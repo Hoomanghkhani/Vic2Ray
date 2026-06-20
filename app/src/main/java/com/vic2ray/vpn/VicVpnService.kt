@@ -6,6 +6,9 @@ import android.net.VpnService
 import android.os.Build
 import android.os.ParcelFileDescriptor
 import android.util.Log
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import libv2ray.Libv2ray
 import libv2ray.CoreController
 
@@ -45,36 +48,40 @@ class VicVpnService : VpnService() {
         return START_NOT_STICKY
     }
 
+    private val serviceScope = CoroutineScope(Dispatchers.IO)
+
     private fun connect(jsonConfig: String) {
         Log.d(TAG, "connect() called")
         disconnect()
 
-        try {
-            Log.d(TAG, "Starting V2Ray core...")
-            coreController = Libv2ray.newCoreController(null)
-            coreController?.startLoop(jsonConfig, 0)
-            Log.d(TAG, "V2Ray core started")
+        serviceScope.launch {
+            try {
+                Log.d(TAG, "Setting up VPN tunnel...")
+                val builder = Builder()
+                builder.setSession("Vic2Ray")
+                builder.addAddress("10.0.0.2", 24)
+                builder.addDnsServer("8.8.8.8")
+                builder.addDnsServer("8.8.4.4")
+                builder.addRoute("0.0.0.0", 0)
 
-            Log.d(TAG, "Setting up VPN tunnel...")
-            val builder = Builder()
-            builder.setSession("Vic2Ray")
-            builder.addAddress("10.0.0.2", 24)
-            builder.addDnsServer("8.8.8.8")
-            builder.addDnsServer("8.8.4.4")
-            builder.addRoute("0.0.0.0", 0)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    builder.setHttpProxy(ProxyInfo.buildDirectProxy("127.0.0.1", 10809))
+                }
 
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                builder.setHttpProxy(ProxyInfo.buildDirectProxy("127.0.0.1", 10809))
+                // This line automatically shows the VPN system notification
+                vpnInterface = builder.establish()
+                Log.d(TAG, "VPN tunnel established: ${vpnInterface != null}")
+
+                Log.d(TAG, "Starting V2Ray core...")
+                coreController = Libv2ray.newCoreController(null)
+                coreController?.startLoop(jsonConfig, 0)
+                Log.d(TAG, "V2Ray core started")
+
+            } catch (e: Exception) {
+                Log.e(TAG, "Error in connect()", e)
+                disconnect()
+                stopSelf()
             }
-
-            // This line automatically shows the VPN system notification, no startForeground needed!
-            vpnInterface = builder.establish()
-            Log.d(TAG, "VPN tunnel established: ${vpnInterface != null}")
-
-        } catch (e: Exception) {
-            Log.e(TAG, "Error in connect()", e)
-            disconnect()
-            stopSelf()
         }
     }
 
