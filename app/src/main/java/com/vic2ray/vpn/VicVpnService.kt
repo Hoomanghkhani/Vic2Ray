@@ -1,16 +1,11 @@
 package com.vic2ray.vpn
 
-import android.app.NotificationChannel
-import android.app.NotificationManager
-import android.app.PendingIntent
 import android.content.Intent
 import android.net.ProxyInfo
 import android.net.VpnService
 import android.os.Build
 import android.os.ParcelFileDescriptor
 import android.util.Log
-import androidx.core.app.NotificationCompat
-import com.vic2ray.ui.MainActivity
 import libv2ray.Libv2ray
 import libv2ray.CoreController
 
@@ -24,8 +19,6 @@ class VicVpnService : VpnService() {
         const val ACTION_CONNECT = "com.vic2ray.vpn.CONNECT"
         const val ACTION_DISCONNECT = "com.vic2ray.vpn.DISCONNECT"
         const val EXTRA_CONFIG = "config"
-        private const val CHANNEL_ID = "vic2ray_vpn"
-        private const val NOTIFICATION_ID = 1
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -56,9 +49,6 @@ class VicVpnService : VpnService() {
         Log.d(TAG, "connect() called")
         disconnect()
 
-        // این باید اولین کار باشد! بدون این، سیستم اندروید سرویس را می‌کشد
-        showForegroundNotification()
-
         try {
             Log.d(TAG, "Starting V2Ray core...")
             coreController = Libv2ray.newCoreController(null)
@@ -67,7 +57,7 @@ class VicVpnService : VpnService() {
 
             Log.d(TAG, "Setting up VPN tunnel...")
             val builder = Builder()
-            builder.setSession("Vic2ray VPN")
+            builder.setSession("Vic2Ray")
             builder.addAddress("10.0.0.2", 24)
             builder.addDnsServer("8.8.8.8")
             builder.addDnsServer("8.8.4.4")
@@ -77,6 +67,7 @@ class VicVpnService : VpnService() {
                 builder.setHttpProxy(ProxyInfo.buildDirectProxy("127.0.0.1", 10809))
             }
 
+            // This line automatically shows the VPN system notification, no startForeground needed!
             vpnInterface = builder.establish()
             Log.d(TAG, "VPN tunnel established: ${vpnInterface != null}")
 
@@ -84,46 +75,6 @@ class VicVpnService : VpnService() {
             Log.e(TAG, "Error in connect()", e)
             disconnect()
             stopSelf()
-        }
-    }
-
-    private fun showForegroundNotification() {
-        try {
-            // ساخت کانال نوتیفیکیشن (اندروید ۸+)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                val channel = NotificationChannel(
-                    CHANNEL_ID,
-                    "Vic2Ray VPN",
-                    NotificationManager.IMPORTANCE_LOW
-                ).apply {
-                    description = "وضعیت اتصال VPN"
-                    setShowBadge(false)
-                }
-                val manager = getSystemService(NotificationManager::class.java)
-                manager?.createNotificationChannel(channel)
-            }
-
-            val activityIntent = Intent(this, MainActivity::class.java).apply {
-                flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
-            }
-            val pendingIntent = PendingIntent.getActivity(
-                this, 0, activityIntent,
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-            )
-
-            val notification = NotificationCompat.Builder(this, CHANNEL_ID)
-                .setContentTitle("Vic2Ray VPN")
-                .setContentText("اتصال برقرار است")
-                .setSmallIcon(android.R.drawable.ic_secure)
-                .setContentIntent(pendingIntent)
-                .setOngoing(true)
-                .setSilent(true)
-                .build()
-
-            startForeground(NOTIFICATION_ID, notification)
-            Log.d(TAG, "Foreground notification shown")
-        } catch (e: Exception) {
-            Log.e(TAG, "Error showing foreground notification", e)
         }
     }
 
@@ -141,12 +92,6 @@ class VicVpnService : VpnService() {
         }
         vpnInterface = null
         coreController = null
-        try {
-            @Suppress("DEPRECATION")
-            stopForeground(true)
-        } catch (e: Exception) {
-            Log.e(TAG, "Error stopping foreground", e)
-        }
     }
 
     override fun onDestroy() {

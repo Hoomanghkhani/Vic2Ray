@@ -117,23 +117,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (syncJob?.isActive == true) return
 
         syncJob = viewModelScope.launch {
-            _allConfigs.value = emptyList() // پاک کردن سرورهای قبلی
-            _uiState.value = UiState.Loading("در حال دریافت کانفیگ‌ها...")
+            _allConfigs.value = emptyList()
+            _uiState.value = UiState.Loading("Fetching configs...")
             
             try {
-                // دریافت
                 val rawTexts = fetcher.fetchAllRawConfigs(_customSources.value)
                 
                 if(rawTexts.isEmpty()) {
-                    _uiState.value = UiState.Error("هیچ کانفیگی دریافت نشد! لطفاً اینترنت خود را بررسی کنید.")
+                    _uiState.value = UiState.Error("No configs found! Please check your connection.")
                     return@launch
                 }
 
-                // پردازش
-                _uiState.value = UiState.Loading("در حال پردازش ${rawTexts.size} کانفیگ...")
+                _uiState.value = UiState.Loading("Parsing ${rawTexts.size} configs...")
                 val parsedConfigs = parser.parseConfigs(rawTexts)
                 
-                // تست جریانی (Streaming)
                 _uiState.value = UiState.Testing(0, parsedConfigs.size, emptyList())
                 
                 val currentWorking = mutableListOf<VpnConfig>()
@@ -146,18 +143,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     _allConfigs.value = sorted
                     saveConfigsToCache(sorted)
                     
-                    // اپدیت UI بلافاصله
                     _uiState.value = UiState.Testing(testedCount, parsedConfigs.size, sorted)
                 }
                 
-                // پایان تست‌ها موفقیت‌آمیز
                 _uiState.value = UiState.Success(_allConfigs.value)
 
             } catch (e: CancellationException) {
-                // با زدن دکمه توقف، این ارور پرتاب می‌شود که نباید به عنوان خطای واقعی در نظر گرفته شود
                 throw e
             } catch (e: Exception) {
-                _uiState.value = UiState.Error(e.message ?: "خطای نامشخص رخ داد")
+                _uiState.value = UiState.Error(e.message ?: "Unknown error occurred")
             }
         }
     }

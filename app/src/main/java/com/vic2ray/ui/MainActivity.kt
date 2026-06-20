@@ -64,7 +64,7 @@ class MainActivity : ComponentActivity() {
 }
 
 /**
- * شروع امن سرویس VPN با مدیریت تمام نسخه‌های اندروید
+ * Safe start of VPN Service
  */
 private fun safeStartVpnService(context: Context, jsonConfig: String) {
     val intent = Intent(context, VicVpnService::class.java).apply {
@@ -72,14 +72,12 @@ private fun safeStartVpnService(context: Context, jsonConfig: String) {
         putExtra(VicVpnService.EXTRA_CONFIG, jsonConfig)
     }
     try {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            context.startForegroundService(intent)
-        } else {
-            context.startService(intent)
-        }
-        Toast.makeText(context, "در حال اتصال به سرور...", Toast.LENGTH_SHORT).show()
+        // VpnService only needs startService, NOT startForegroundService.
+        // It automatically handles foreground system notification.
+        context.startService(intent)
+        Toast.makeText(context, "Connecting...", Toast.LENGTH_SHORT).show()
     } catch (e: Exception) {
-        Toast.makeText(context, "خطا در شروع سرویس: ${e.message}", Toast.LENGTH_LONG).show()
+        Toast.makeText(context, "Start error: ${e.message}", Toast.LENGTH_LONG).show()
     }
 }
 
@@ -101,12 +99,11 @@ fun Vic2rayApp(mainViewModel: MainViewModel = viewModel()) {
                 safeStartVpnService(context, config)
             }
         } else {
-            Toast.makeText(context, "مجوز VPN داده نشد!", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, "VPN Permission Denied!", Toast.LENGTH_SHORT).show()
         }
         pendingVpnConfig = null
     }
 
-    // دیالوگ مدیریت لینک‌ها
     if (showAddDialog) {
         SourcesManagementDialog(
             mainViewModel = mainViewModel,
@@ -134,7 +131,7 @@ fun Vic2rayApp(mainViewModel: MainViewModel = viewModel()) {
                 },
                 actions = {
                     IconButton(onClick = { showAddDialog = true }) {
-                        Icon(Icons.Default.Add, contentDescription = "مدیریت سورس‌ها", tint = MaterialTheme.colorScheme.primary)
+                        Icon(Icons.Default.Add, contentDescription = "Manage Sources", tint = MaterialTheme.colorScheme.primary)
                     }
                 },
                 colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
@@ -146,7 +143,6 @@ fun Vic2rayApp(mainViewModel: MainViewModel = viewModel()) {
     ) { padding ->
         Column(modifier = Modifier.padding(padding).fillMaxSize()) {
 
-            // تب‌های پروتکل
             ScrollableTabRow(
                 selectedTabIndex = ProtocolType.values().indexOf(selectedProtocol),
                 edgePadding = 8.dp,
@@ -179,7 +175,6 @@ fun Vic2rayApp(mainViewModel: MainViewModel = viewModel()) {
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            // بخش اصلی
             Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
                 when (val state = uiState) {
                     is UiState.Idle -> {
@@ -187,9 +182,9 @@ fun Vic2rayApp(mainViewModel: MainViewModel = viewModel()) {
                             modifier = Modifier.align(Alignment.Center),
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
-                            Text("آماده برای اسکن سرورها", color = Color.Gray, fontSize = 18.sp)
+                            Text("Ready to scan servers", color = Color.Gray, fontSize = 18.sp)
                             Spacer(modifier = Modifier.height(16.dp))
-                            SyncButton(onClick = { mainViewModel.syncAndTestServers() })
+                            SyncButton(onClick = { mainViewModel.syncAndTestServers() }, text = "Start Sync")
                         }
                     }
                     is UiState.Loading -> {
@@ -210,8 +205,8 @@ fun Vic2rayApp(mainViewModel: MainViewModel = viewModel()) {
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Column {
-                                    Text("در حال تست...", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
-                                    Text("پیدا شده: ${state.foundCount}", color = Color.LightGray, fontSize = 12.sp)
+                                    Text("Testing Servers...", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                                    Text("Found: ${state.foundCount}", color = Color.LightGray, fontSize = 12.sp)
                                 }
                                 IconButton(
                                     onClick = { mainViewModel.stopSync() },
@@ -225,7 +220,7 @@ fun Vic2rayApp(mainViewModel: MainViewModel = viewModel()) {
                                 allConfigs = state.currentWorking,
                                 selectedProtocol = selectedProtocol,
                                 isRefreshing = true,
-                                onRefresh = { /* در حالت تست، رفرش مجدد فعال نیست */ },
+                                onRefresh = { },
                                 onConnect = { jsonConfig ->
                                     handleConnect(context, jsonConfig, vpnPermissionLauncher) { pendingVpnConfig = it }
                                 }
@@ -237,10 +232,10 @@ fun Vic2rayApp(mainViewModel: MainViewModel = viewModel()) {
                             modifier = Modifier.align(Alignment.Center),
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
-                            Text("خطا", color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Bold)
+                            Text("Error", color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Bold)
                             Text(state.error, color = Color.LightGray, modifier = Modifier.padding(16.dp))
                             Spacer(modifier = Modifier.height(16.dp))
-                            SyncButton(onClick = { mainViewModel.syncAndTestServers() }, text = "تلاش مجدد")
+                            SyncButton(onClick = { mainViewModel.syncAndTestServers() }, text = "Retry")
                         }
                     }
                     is UiState.Success -> {
@@ -273,9 +268,6 @@ fun Vic2rayApp(mainViewModel: MainViewModel = viewModel()) {
     }
 }
 
-/**
- * مدیریت فرآیند اتصال: بررسی مجوز VPN و شروع سرویس
- */
 private fun handleConnect(
     context: Context,
     jsonConfig: String,
@@ -285,21 +277,15 @@ private fun handleConnect(
     try {
         val vpnIntent = android.net.VpnService.prepare(context)
         if (vpnIntent != null) {
-            // نیاز به دریافت مجوز VPN از کاربر
             setPendingConfig(jsonConfig)
             vpnPermissionLauncher.launch(vpnIntent)
         } else {
-            // مجوز قبلاً داده شده، مستقیم وصل شو
             safeStartVpnService(context, jsonConfig)
         }
     } catch (e: Exception) {
-        Toast.makeText(context, "خطا: ${e.message}", Toast.LENGTH_LONG).show()
+        Toast.makeText(context, "Error: ${e.message}", Toast.LENGTH_LONG).show()
     }
 }
-
-// ============================================================
-// دیالوگ مدیریت لینک‌ها
-// ============================================================
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -310,10 +296,10 @@ fun SourcesManagementDialog(mainViewModel: MainViewModel, onDismiss: () -> Unit)
     AlertDialog(
         onDismissRequest = onDismiss,
         containerColor = MaterialTheme.colorScheme.surface,
-        title = { Text("مدیریت لینک‌های سرور", color = Color.White, fontWeight = FontWeight.Bold) },
+        title = { Text("Manage Sources", color = Color.White, fontWeight = FontWeight.Bold) },
         text = {
             Column(modifier = Modifier.fillMaxWidth()) {
-                Text("لینک‌های فعلی:", color = Color.LightGray, fontSize = 14.sp)
+                Text("Current Sources:", color = Color.LightGray, fontSize = 14.sp)
                 Spacer(modifier = Modifier.height(8.dp))
 
                 LazyColumn(
@@ -337,7 +323,7 @@ fun SourcesManagementDialog(mainViewModel: MainViewModel, onDismiss: () -> Unit)
                                 maxLines = 1
                             )
                             IconButton(onClick = { mainViewModel.removeSource(source) }) {
-                                Icon(Icons.Default.Close, contentDescription = "حذف", tint = Color.Red, modifier = Modifier.size(20.dp))
+                                Icon(Icons.Default.Close, contentDescription = "Delete", tint = Color.Red, modifier = Modifier.size(20.dp))
                             }
                         }
                     }
@@ -347,7 +333,7 @@ fun SourcesManagementDialog(mainViewModel: MainViewModel, onDismiss: () -> Unit)
                 OutlinedTextField(
                     value = urlInput,
                     onValueChange = { urlInput = it },
-                    label = { Text("لینک خام (Raw) جدید") },
+                    label = { Text("New Raw URL") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                     colors = TextFieldDefaults.outlinedTextFieldColors(
@@ -366,20 +352,16 @@ fun SourcesManagementDialog(mainViewModel: MainViewModel, onDismiss: () -> Unit)
                     }
                 },
                 colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
-            ) { Text("اضافه کردن", color = Color.Black, fontWeight = FontWeight.Bold) }
+            ) { Text("Add", color = Color.Black, fontWeight = FontWeight.Bold) }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("بستن", color = Color.LightGray) }
+            TextButton(onClick = onDismiss) { Text("Close", color = Color.LightGray) }
         }
     )
 }
 
-// ============================================================
-// دکمه همگام‌سازی
-// ============================================================
-
 @Composable
-fun SyncButton(onClick: () -> Unit, text: String = "شروع همگام سازی") {
+fun SyncButton(onClick: () -> Unit, text: String = "Start Sync") {
     Button(
         onClick = onClick,
         colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
@@ -389,10 +371,6 @@ fun SyncButton(onClick: () -> Unit, text: String = "شروع همگام سازی
         Text(text, color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 16.sp)
     }
 }
-
-// ============================================================
-// لیست سرورها با Pull-to-Refresh
-// ============================================================
 
 @OptIn(ExperimentalMaterialApi::class)
 @Composable
@@ -410,7 +388,7 @@ fun ConfigList(
         if (filteredList.isEmpty()) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Text(
-                    "سروری برای این پروتکل یافت نشد.\nبه پایین بکشید تا رفرش شود.",
+                    "No server found for this protocol.\nPull down to refresh.",
                     color = Color.Gray,
                     textAlign = TextAlign.Center
                 )
@@ -436,10 +414,6 @@ fun ConfigList(
     }
 }
 
-// ============================================================
-// کارت هر سرور
-// ============================================================
-
 @Composable
 fun ConfigItemCard(config: VpnConfig, onConnect: (String) -> Unit) {
     val context = LocalContext.current
@@ -454,7 +428,7 @@ fun ConfigItemCard(config: VpnConfig, onConnect: (String) -> Unit) {
                     val jsonConfig = V2rayConfigGenerator.generateJsonConfig(config.rawConfig, config.protocol)
                     onConnect(jsonConfig)
                 } catch (e: Exception) {
-                    Toast.makeText(context, "خطا در پردازش کانفیگ: ${e.message}", Toast.LENGTH_LONG).show()
+                    Toast.makeText(context, "Config parse error: ${e.message}", Toast.LENGTH_LONG).show()
                 }
             },
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -495,7 +469,6 @@ fun ConfigItemCard(config: VpnConfig, onConnect: (String) -> Unit) {
                     )
                 }
 
-                // پینگ
                 val pingColor = when {
                     config.ping < 300 -> Color(0xFF00E676)
                     config.ping < 600 -> Color(0xFFFFD600)
