@@ -73,6 +73,11 @@ class VicVpnService : VpnService() {
                 Log.d(TAG, "VPN tunnel established: ${vpnInterface != null}")
 
                 Log.d(TAG, "Starting V2Ray core...")
+                try {
+                    Libv2ray.initCoreEnv(applicationContext.filesDir.absolutePath, applicationContext.filesDir.absolutePath)
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error in initCoreEnv", e)
+                }
                 coreController = Libv2ray.newCoreController(null)
                 coreController?.startLoop(jsonConfig, 0)
                 Log.d(TAG, "V2Ray core started")
