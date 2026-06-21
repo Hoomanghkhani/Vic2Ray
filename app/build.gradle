@@ -20,7 +20,8 @@ android {
         }
         ndk {
             // فقط معماری گوشی‌های جدید را نگه می‌دارد تا حجم برنامه ۳ برابر کمتر شود
-            abiFilters 'arm64-v8a'
+            // x86_64 is added for Android Studio Emulator support
+            abiFilters 'arm64-v8a', 'x86_64'
         }
     }
 
