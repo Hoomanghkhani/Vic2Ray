@@ -49,6 +49,13 @@ object V2rayConfigGenerator {
         inbounds.put(socksInbound)
         inbounds.put(httpInbound)
         template.put("inbounds", inbounds)
+
+        // Explicit empty routing to avoid V2Ray loading default rules that depend on geoip/geosite
+        template.put("routing", JSONObject().apply {
+            put("domainStrategy", "AsIs")
+            put("rules", JSONArray())
+        })
+
         return template
     }
 
