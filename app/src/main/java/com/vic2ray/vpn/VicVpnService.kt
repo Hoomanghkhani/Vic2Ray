@@ -78,7 +78,23 @@ class VicVpnService : VpnService() {
                 } catch (e: Exception) {
                     Log.e(TAG, "Error in initCoreEnv", e)
                 }
-                coreController = Libv2ray.newCoreController(null)
+                
+                val callbackHandler = object : libv2ray.CoreCallbackHandler {
+                    override fun onEmitStatus(status: Long, message: String?): Long {
+                        Log.d(TAG, "V2Ray Status: $status, Message: $message")
+                        return 0
+                    }
+                    override fun shutdown(): Long {
+                        Log.d(TAG, "V2Ray Shutdown")
+                        return 0
+                    }
+                    override fun startup(): Long {
+                        Log.d(TAG, "V2Ray Startup")
+                        return 0
+                    }
+                }
+                
+                coreController = Libv2ray.newCoreController(callbackHandler)
                 coreController?.startLoop(jsonConfig, 0)
                 Log.d(TAG, "V2Ray core started")
 
