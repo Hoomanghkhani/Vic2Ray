@@ -23,7 +23,7 @@ object V2rayConfigGenerator {
         val template = JSONObject()
         
         template.put("log", JSONObject().apply {
-            put("loglevel", "warning")
+            put("loglevel", "debug")
         })
 
         val inbounds = JSONArray()
@@ -142,8 +142,20 @@ object V2rayConfigGenerator {
     }
 
     private fun buildVlessJson(vlessUrl: String): String {
-        val uri = Uri.parse(vlessUrl)
-        val id = uri.userInfo ?: ""
+        val withoutScheme = vlessUrl.removePrefix("vless://")
+        val atIndex = withoutScheme.indexOf("@")
+        
+        var id = ""
+        var hostPortPath = withoutScheme
+        
+        if (atIndex != -1) {
+            id = withoutScheme.substring(0, atIndex)
+            id = URLDecoder.decode(id, "UTF-8")
+            hostPortPath = withoutScheme.substring(atIndex + 1)
+        }
+        
+        // Use http scheme to ensure Android Uri parses the host, port, and query properly
+        val uri = Uri.parse("http://$hostPortPath")
         val add = uri.host ?: ""
         val port = uri.port.takeIf { it > 0 } ?: 443
         
@@ -178,11 +190,20 @@ object V2rayConfigGenerator {
     }
 
     private fun buildTrojanJson(trojanUrl: String): String {
-        val uri = Uri.parse(trojanUrl)
-        var password = uri.userInfo ?: ""
-        if (password.isEmpty() && trojanUrl.contains("@")) {
-            password = trojanUrl.substringAfter("://").substringBefore("@")
+        val withoutScheme = trojanUrl.removePrefix("trojan://")
+        val atIndex = withoutScheme.indexOf("@")
+        
+        var password = ""
+        var hostPortPath = withoutScheme
+        
+        if (atIndex != -1) {
+            password = withoutScheme.substring(0, atIndex)
+            password = URLDecoder.decode(password, "UTF-8")
+            hostPortPath = withoutScheme.substring(atIndex + 1)
         }
+        
+        // Use http scheme to ensure Android Uri parses the host, port, and query properly
+        val uri = Uri.parse("http://$hostPortPath")
         val add = uri.host ?: ""
         val port = uri.port.takeIf { it > 0 } ?: 443
         
