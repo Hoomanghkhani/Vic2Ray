@@ -75,8 +75,8 @@ class VicVpnService : VpnService() {
                 Log.d(TAG, "Starting V2Ray core...")
                 try {
                     // The second parameter for Xray's initCoreEnv is xudpBaseKey (Base64 encoded).
-                    // A 32-byte key encoded in Base64 is 44 characters long.
-                    val xudpBaseKey = "MTIzNDU2Nzg5MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTI="
+                    // A 32-byte key encoded in Raw Base64 (no padding) is 43 characters long.
+                    val xudpBaseKey = "QUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUE"
                     Libv2ray.initCoreEnv(applicationContext.filesDir.absolutePath, xudpBaseKey)
                 } catch (e: Exception) {
                     Log.e(TAG, "Error in initCoreEnv", e)
