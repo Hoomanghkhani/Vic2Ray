@@ -2,26 +2,28 @@ package com.vic2ray.tester
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.net.HttpURLConnection
 import java.net.InetSocketAddress
 import java.net.Proxy
-import java.net.Socket
+import java.net.URL
 
 object RealPingTester {
     suspend fun testCurrentConnectionPing(): Int = withContext(Dispatchers.IO) {
         val startTime = System.currentTimeMillis()
         try {
-            // V2Ray default local SOCKS proxy in this app
-            android.util.Log.d("RealPingTester", "Attempting to connect to proxy 127.0.0.1:10808...")
-            val proxy = Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", 10808))
-            val socket = Socket(proxy)
-            // Let the remote proxy resolve the DNS to avoid local DNS issues
-            val dest = InetSocketAddress.createUnresolved("www.google.com", 80)
+            android.util.Log.d("RealPingTester", "Attempting HTTP ping via proxy 127.0.0.1:10809...")
+            val proxy = Proxy(Proxy.Type.HTTP, InetSocketAddress("127.0.0.1", 10809))
+            // Use Cloudflare IP directly to completely bypass Android DNS resolution bugs
+            val url = URL("http://1.1.1.1/")
             
-            android.util.Log.d("RealPingTester", "Socket connect to www.google.com:80 via proxy...")
-            socket.connect(dest, 3000)
+            val connection = url.openConnection(proxy) as HttpURLConnection
+            connection.connectTimeout = 3000
+            connection.readTimeout = 3000
+            connection.useCaches = false
             
-            android.util.Log.d("RealPingTester", "Socket connected successfully!")
-            socket.close()
+            android.util.Log.d("RealPingTester", "Connecting to 1.1.1.1 via HTTP proxy...")
+            val responseCode = connection.responseCode
+            android.util.Log.d("RealPingTester", "Response Code: $responseCode")
             
             val endTime = System.currentTimeMillis()
             val ping = (endTime - startTime).toInt()
