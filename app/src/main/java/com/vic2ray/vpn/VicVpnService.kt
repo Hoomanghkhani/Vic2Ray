@@ -11,6 +11,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import libv2ray.Libv2ray
 import libv2ray.CoreController
+import kotlinx.coroutines.flow.MutableStateFlow
 
 class VicVpnService : VpnService() {
 
@@ -22,6 +23,8 @@ class VicVpnService : VpnService() {
         const val ACTION_CONNECT = "com.vic2ray.vpn.CONNECT"
         const val ACTION_DISCONNECT = "com.vic2ray.vpn.DISCONNECT"
         const val EXTRA_CONFIG = "config"
+        
+        val isConnected = MutableStateFlow(false)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -99,6 +102,7 @@ class VicVpnService : VpnService() {
                 
                 coreController = Libv2ray.newCoreController(callbackHandler)
                 coreController?.startLoop(jsonConfig, 0)
+                isConnected.value = true
                 Log.d(TAG, "V2Ray core started")
 
             } catch (e: Exception) {
@@ -123,6 +127,7 @@ class VicVpnService : VpnService() {
         }
         vpnInterface = null
         coreController = null
+        isConnected.value = false
     }
 
     override fun onDestroy() {

@@ -87,6 +87,8 @@ fun Vic2rayApp(mainViewModel: MainViewModel = viewModel()) {
     val uiState by mainViewModel.uiState.collectAsState()
     val selectedProtocol by mainViewModel.selectedProtocol.collectAsState()
     var showAddDialog by remember { mutableStateOf(false) }
+    
+    val isVpnConnected by VicVpnService.isConnected.collectAsState()
 
     val context = LocalContext.current
     var pendingVpnConfig by remember { mutableStateOf<String?>(null) }
@@ -138,6 +140,43 @@ fun Vic2rayApp(mainViewModel: MainViewModel = viewModel()) {
                     containerColor = Color.Transparent,
                 )
             )
+        },
+        bottomBar = {
+            AnimatedVisibility(
+                visible = isVpnConnected,
+                enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
+                exit = slideOutVertically(targetOffsetY = { it }) + fadeOut()
+            ) {
+                Surface(
+                    color = Color(0xFF00E676).copy(alpha = 0.15f),
+                    contentColor = Color(0xFF00E676),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp).fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(modifier = Modifier.size(10.dp).clip(androidx.compose.foundation.shape.CircleShape).background(Color(0xFF00E676)))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Connected", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                        }
+                        Button(
+                            onClick = {
+                                val intent = Intent(context, VicVpnService::class.java).apply {
+                                    action = VicVpnService.ACTION_DISCONNECT
+                                }
+                                context.startService(intent)
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color.Red.copy(alpha = 0.8f)),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Text("Disconnect", color = Color.White, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
         },
         containerColor = MaterialTheme.colorScheme.background
     ) { padding ->
