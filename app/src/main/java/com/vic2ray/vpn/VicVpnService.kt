@@ -25,6 +25,7 @@ class VicVpnService : VpnService() {
         const val EXTRA_CONFIG = "config"
         
         val isConnected = MutableStateFlow(false)
+        val currentPing = MutableStateFlow(-1)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -104,6 +105,14 @@ class VicVpnService : VpnService() {
                 coreController?.startLoop(jsonConfig, 0)
                 isConnected.value = true
                 Log.d(TAG, "V2Ray core started")
+                
+                // Initial ping test
+                serviceScope.launch {
+                    currentPing.value = -2 // -2 means loading
+                    kotlinx.coroutines.delay(1000) // Give the proxy a moment to establish connection
+                    val ping = com.vic2ray.tester.RealPingTester.testCurrentConnectionPing()
+                    currentPing.value = ping
+                }
 
             } catch (e: Exception) {
                 Log.e(TAG, "Error in connect()", e)
@@ -128,6 +137,7 @@ class VicVpnService : VpnService() {
         vpnInterface = null
         coreController = null
         isConnected.value = false
+        currentPing.value = -1
     }
 
     override fun onDestroy() {

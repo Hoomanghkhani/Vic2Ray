@@ -43,6 +43,7 @@ import com.vic2ray.models.ProtocolType
 import com.vic2ray.models.VpnConfig
 import com.vic2ray.vpn.VicVpnService
 import com.vic2ray.vpn.V2rayConfigGenerator
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -89,6 +90,8 @@ fun Vic2rayApp(mainViewModel: MainViewModel = viewModel()) {
     var showAddDialog by remember { mutableStateOf(false) }
     
     val isVpnConnected by VicVpnService.isConnected.collectAsState()
+    val currentPing by VicVpnService.currentPing.collectAsState()
+    val scope = rememberCoroutineScope()
 
     val context = LocalContext.current
     var pendingVpnConfig by remember { mutableStateOf<String?>(null) }
@@ -157,10 +160,42 @@ fun Vic2rayApp(mainViewModel: MainViewModel = viewModel()) {
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .clickable {
+                                    if (currentPing != -2) {
+                                        scope.launch {
+                                            VicVpnService.currentPing.value = -2 // loading state
+                                            val ping = com.vic2ray.tester.RealPingTester.testCurrentConnectionPing()
+                                            VicVpnService.currentPing.value = ping
+                                        }
+                                    }
+                                }
+                                .padding(8.dp)
+                        ) {
                             Box(modifier = Modifier.size(10.dp).clip(androidx.compose.foundation.shape.CircleShape).background(Color(0xFF00E676)))
                             Spacer(modifier = Modifier.width(8.dp))
                             Text("Connected", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            
+                            val pingText = when {
+                                currentPing == -2 -> "Testing..."
+                                currentPing > 0 -> "$currentPing ms"
+                                else -> "Timeout"
+                            }
+                            val pingColor = when {
+                                currentPing == -2 -> Color.Gray
+                                currentPing in 1..299 -> Color(0xFF00E676)
+                                currentPing in 300..599 -> Color(0xFFFFD600)
+                                else -> Color(0xFFFF3D00)
+                            }
+                            Text(
+                                text = "($pingText)",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 14.sp,
+                                color = pingColor
+                            )
                         }
                         Button(
                             onClick = {
