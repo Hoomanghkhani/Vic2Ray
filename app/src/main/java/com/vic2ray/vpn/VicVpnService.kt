@@ -108,7 +108,14 @@ class VicVpnService : VpnService() {
                 serviceScope.launch {
                     currentPing.value = -2 // -2 means loading
                     kotlinx.coroutines.delay(1000) // Give the proxy a moment to establish connection
-                    val ping = com.vic2ray.tester.RealPingTester.testCurrentConnectionPing()
+                    var ping = com.vic2ray.tester.RealPingTester.testCurrentConnectionPing()
+                    
+                    if (ping == -1) {
+                        // Sometimes the VMess handshake takes a bit longer, let's retry once
+                        kotlinx.coroutines.delay(2000)
+                        ping = com.vic2ray.tester.RealPingTester.testCurrentConnectionPing()
+                    }
+                    
                     currentPing.value = ping
                 }
 
