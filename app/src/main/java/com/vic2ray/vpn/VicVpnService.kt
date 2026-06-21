@@ -63,10 +63,8 @@ class VicVpnService : VpnService() {
                 Log.d(TAG, "Setting up VPN tunnel...")
                 val builder = Builder()
                 builder.setSession("Vic2Ray")
+                // A minimum configuration to establish the VPN interface
                 builder.addAddress("10.0.0.2", 24)
-                builder.addDnsServer("8.8.8.8")
-                builder.addDnsServer("8.8.4.4")
-                builder.addRoute("0.0.0.0", 0)
 
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                     builder.setHttpProxy(ProxyInfo.buildDirectProxy("127.0.0.1", 10809))
