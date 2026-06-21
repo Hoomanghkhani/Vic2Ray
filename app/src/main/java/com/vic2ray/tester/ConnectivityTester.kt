@@ -48,15 +48,14 @@ class ConnectivityTester {
 
         var isSuccess = false
         var pingResult = -1
+        val startTime = System.currentTimeMillis()
 
         if (host.isNotEmpty()) {
-            val startTime = System.currentTimeMillis()
             try {
                 val socket = Socket()
                 socket.connect(InetSocketAddress(host, port), 2000)
                 socket.close()
                 isSuccess = true
-                pingResult = (System.currentTimeMillis() - startTime).toInt()
             } catch (e: Exception) {
                 isSuccess = false
             }

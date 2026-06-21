@@ -1,6 +1,7 @@
 package com.vic2ray.vpn
 
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.ProxyInfo
 import android.net.VpnService
 import android.os.Build
