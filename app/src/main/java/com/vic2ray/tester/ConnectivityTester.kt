@@ -1,10 +1,13 @@
 package com.vic2ray.tester
 
 import com.vic2ray.models.VpnConfig
+import com.vic2ray.models.ProtocolType
 import kotlinx.coroutines.*
 import java.net.InetSocketAddress
-import java.net.Proxy
 import java.net.Socket
+import android.net.Uri
+import android.util.Base64
+import org.json.JSONObject
 
 class ConnectivityTester {
 
@@ -13,17 +16,50 @@ class ConnectivityTester {
      * نکته: در یک اپلیکیشن واقعی باید با خود Core تست شود. در اینجا پینگ ساده به هاست/پورت یا فقط شبیه‌سازی انجام می‌شود.
      */
     suspend fun testConfig(config: VpnConfig): VpnConfig = withContext(Dispatchers.IO) {
-        val startTime = System.currentTimeMillis()
+        var host = ""
+        var port = 443
+
+        try {
+            when (config.protocol) {
+                ProtocolType.VMESS -> {
+                    val base64Part = config.rawConfig.removePrefix("vmess://")
+                    val jsonString = String(Base64.decode(base64Part, Base64.DEFAULT), Charsets.UTF_8)
+                    val json = JSONObject(jsonString)
+                    host = json.optString("add", "")
+                    port = json.optString("port", "443").toIntOrNull() ?: 443
+                }
+                else -> {
+                    val uri = Uri.parse(config.rawConfig)
+                    var uriHost = uri.host ?: ""
+                    // Handle case where URI parsing fails (e.g. missing '//' or bad password)
+                    if (uriHost.isEmpty() && config.rawConfig.contains("@")) {
+                        val partAfterAt = config.rawConfig.substringAfter("@")
+                        uriHost = partAfterAt.substringBefore(":")
+                        val portStr = partAfterAt.substringAfter(":").substringBefore("?")
+                        port = portStr.toIntOrNull() ?: 443
+                    }
+                    host = uriHost
+                    if (uri.port > 0) port = uri.port
+                }
+            }
+        } catch (e: Exception) {
+            // parsing failed
+        }
+
         var isSuccess = false
         var pingResult = -1
 
-        try {
-            // شبیه‌سازی تست واقعی
-            delay((50..1500).random().toLong())
-            isSuccess = Math.random() > 0.4 // شانس 60 درصدی برای موفقیت برای نمایش
-            
-        } catch (e: Exception) {
-            isSuccess = false
+        if (host.isNotEmpty()) {
+            val startTime = System.currentTimeMillis()
+            try {
+                val socket = Socket()
+                socket.connect(InetSocketAddress(host, port), 2000)
+                socket.close()
+                isSuccess = true
+                pingResult = (System.currentTimeMillis() - startTime).toInt()
+            } catch (e: Exception) {
+                isSuccess = false
+            }
         }
 
         val endTime = System.currentTimeMillis()

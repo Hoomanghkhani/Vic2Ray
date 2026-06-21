@@ -179,7 +179,10 @@ object V2rayConfigGenerator {
 
     private fun buildTrojanJson(trojanUrl: String): String {
         val uri = Uri.parse(trojanUrl)
-        val password = uri.userInfo ?: ""
+        var password = uri.userInfo ?: ""
+        if (password.isEmpty() && trojanUrl.contains("@")) {
+            password = trojanUrl.substringAfter("://").substringBefore("@")
+        }
         val add = uri.host ?: ""
         val port = uri.port.takeIf { it > 0 } ?: 443
         
