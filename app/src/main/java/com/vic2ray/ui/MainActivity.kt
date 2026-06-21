@@ -21,6 +21,7 @@ import androidx.compose.material.ExperimentalMaterialApi
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.pullrefresh.PullRefreshIndicator
 import androidx.compose.material.pullrefresh.pullRefresh
@@ -88,6 +89,7 @@ fun Vic2rayApp(mainViewModel: MainViewModel = viewModel()) {
     val uiState by mainViewModel.uiState.collectAsState()
     val selectedProtocol by mainViewModel.selectedProtocol.collectAsState()
     var showAddDialog by remember { mutableStateOf(false) }
+    var showAboutDialog by remember { mutableStateOf(false) }
     
     val isVpnConnected by VicVpnService.isConnected.collectAsState()
     val currentPing by VicVpnService.currentPing.collectAsState()
@@ -116,6 +118,10 @@ fun Vic2rayApp(mainViewModel: MainViewModel = viewModel()) {
         )
     }
 
+    if (showAboutDialog) {
+        AboutDialog(onDismiss = { showAboutDialog = false })
+    }
+
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
@@ -135,6 +141,9 @@ fun Vic2rayApp(mainViewModel: MainViewModel = viewModel()) {
                     }
                 },
                 actions = {
+                    IconButton(onClick = { showAboutDialog = true }) {
+                        Icon(Icons.Default.Info, contentDescription = "About", tint = MaterialTheme.colorScheme.primary)
+                    }
                     IconButton(onClick = { showAddDialog = true }) {
                         Icon(Icons.Default.Add, contentDescription = "Manage Sources", tint = MaterialTheme.colorScheme.primary)
                     }
@@ -430,6 +439,54 @@ fun SourcesManagementDialog(mainViewModel: MainViewModel, onDismiss: () -> Unit)
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("Close", color = Color.LightGray) }
+        }
+    )
+}
+
+@Composable
+fun AboutDialog(onDismiss: () -> Unit) {
+    val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = MaterialTheme.colorScheme.surface,
+        title = { Text("About", color = Color.White, fontWeight = FontWeight.Bold) },
+        text = {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Text("Developer: Hooman Ghardashkhani", color = Color.LightGray, fontSize = 14.sp)
+                Spacer(modifier = Modifier.height(16.dp))
+                
+                Button(
+                    onClick = { uriHandler.openUri("https://daramet.com/hoomanghkhani") },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                ) {
+                    Text("Donate (Daramet)", color = Color.Black, fontWeight = FontWeight.Bold)
+                }
+                
+                Spacer(modifier = Modifier.height(8.dp))
+                
+                Button(
+                    onClick = { uriHandler.openUri("https://github.com/Hoomanghkhani/") },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF333333))
+                ) {
+                    Text("GitHub", color = Color.White, fontWeight = FontWeight.Bold)
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+                
+                Button(
+                    onClick = { uriHandler.openUri("https://www.linkedin.com/in/hooman-ghkhani/") },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0077B5))
+                ) {
+                    Text("LinkedIn", color = Color.White, fontWeight = FontWeight.Bold)
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("Close", color = MaterialTheme.colorScheme.primary) }
         }
     )
 }
