@@ -69,7 +69,10 @@ object V2rayConfigGenerator {
         template.put("outbounds", outbounds)
     }
 
-    private fun buildStreamSettings(net: String, tls: String, sni: String, host: String, path: String, flow: String = ""): JSONObject {
+    private fun buildStreamSettings(
+        net: String, tls: String, sni: String, host: String, path: String, flow: String = "",
+        pbk: String = "", fp: String = "", sid: String = "", spx: String = "", alpn: String = ""
+    ): JSONObject {
         val streamSettings = JSONObject()
         val actualNet = if (net.isEmpty()) "tcp" else net
         streamSettings.put("network", actualNet)
@@ -80,6 +83,21 @@ object V2rayConfigGenerator {
                 if (sni.isNotEmpty()) put("serverName", sni)
                 else if (host.isNotEmpty()) put("serverName", host)
                 put("allowInsecure", true)
+                
+                if (alpn.isNotEmpty()) {
+                    val alpnArray = JSONArray()
+                    alpn.split(",").forEach { alpnArray.put(it.trim()) }
+                    put("alpn", alpnArray)
+                }
+
+                if (tls == "reality") {
+                    if (pbk.isNotEmpty()) put("publicKey", pbk)
+                    if (fp.isNotEmpty()) put("fingerprint", fp)
+                    if (sid.isNotEmpty()) put("shortId", sid)
+                    if (spx.isNotEmpty()) put("spiderX", spx)
+                } else {
+                    if (fp.isNotEmpty()) put("fingerprint", fp)
+                }
             }
             if (tls == "tls") streamSettings.put("tlsSettings", tlsSettings)
             if (tls == "xtls") streamSettings.put("xtlsSettings", tlsSettings)
@@ -119,6 +137,12 @@ object V2rayConfigGenerator {
         val tls = vmessParams.optString("tls", "")
         val sni = vmessParams.optString("sni", host)
 
+        val alpn = vmessParams.optString("alpn", "")
+        val fp = vmessParams.optString("fp", "")
+        val pbk = vmessParams.optString("pbk", "")
+        val sid = vmessParams.optString("sid", "")
+        val spx = vmessParams.optString("spx", "")
+
         val template = getBaseTemplate()
         
         val proxyOutbound = JSONObject().apply {
@@ -134,7 +158,7 @@ object V2rayConfigGenerator {
                     }))
                 }))
             })
-            put("streamSettings", buildStreamSettings(net, tls, sni, host, path))
+            put("streamSettings", buildStreamSettings(net, tls, sni, host, path, "", pbk, fp, sid, spx, alpn))
         }
         
         addOutbounds(template, proxyOutbound)
@@ -163,9 +187,14 @@ object V2rayConfigGenerator {
         val security = uri.getQueryParameter("security") ?: ""
         val net = uri.getQueryParameter("type") ?: "tcp"
         val host = uri.getQueryParameter("host") ?: ""
-        val path = uri.getQueryParameter("path") ?: ""
+        val path = uri.getQueryParameter("path") ?: uri.getQueryParameter("serviceName") ?: ""
         val sni = uri.getQueryParameter("sni") ?: ""
         val flow = uri.getQueryParameter("flow") ?: ""
+        val pbk = uri.getQueryParameter("pbk") ?: ""
+        val fp = uri.getQueryParameter("fp") ?: ""
+        val sid = uri.getQueryParameter("sid") ?: ""
+        val spx = uri.getQueryParameter("spx") ?: ""
+        val alpn = uri.getQueryParameter("alpn") ?: ""
 
         val template = getBaseTemplate()
 
@@ -182,7 +211,7 @@ object V2rayConfigGenerator {
                     }))
                 }))
             })
-            put("streamSettings", buildStreamSettings(net, security, sni, host, path, flow))
+            put("streamSettings", buildStreamSettings(net, security, sni, host, path, flow, pbk, fp, sid, spx, alpn))
         }
 
         addOutbounds(template, proxyOutbound)
@@ -210,8 +239,13 @@ object V2rayConfigGenerator {
         val security = uri.getQueryParameter("security") ?: "tls"
         val net = uri.getQueryParameter("type") ?: "tcp"
         val host = uri.getQueryParameter("host") ?: ""
-        val path = uri.getQueryParameter("path") ?: ""
+        val path = uri.getQueryParameter("path") ?: uri.getQueryParameter("serviceName") ?: ""
         val sni = uri.getQueryParameter("sni") ?: ""
+        val pbk = uri.getQueryParameter("pbk") ?: ""
+        val fp = uri.getQueryParameter("fp") ?: ""
+        val sid = uri.getQueryParameter("sid") ?: ""
+        val spx = uri.getQueryParameter("spx") ?: ""
+        val alpn = uri.getQueryParameter("alpn") ?: ""
 
         val template = getBaseTemplate()
 
@@ -224,7 +258,7 @@ object V2rayConfigGenerator {
                     put("password", password)
                 }))
             })
-            put("streamSettings", buildStreamSettings(net, security, sni, host, path))
+            put("streamSettings", buildStreamSettings(net, security, sni, host, path, "", pbk, fp, sid, spx, alpn))
         }
 
         addOutbounds(template, proxyOutbound)
