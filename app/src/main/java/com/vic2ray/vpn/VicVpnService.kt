@@ -65,9 +65,18 @@ class VicVpnService : VpnService() {
                 builder.setSession("Vic2Ray")
                 // A minimum configuration to establish the VPN interface
                 builder.addAddress("10.0.0.2", 24)
+                builder.setMtu(1500)
 
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                     builder.setHttpProxy(ProxyInfo.buildDirectProxy("127.0.0.1", 10809))
+                }
+                
+                // CRITICAL FIX: Exclude our own app from the VPN so Xray can dial out!
+                // Without this, Android kernel drops Xray's raw outbound TCP packets to prevent VPN loops.
+                try {
+                    builder.addDisallowedApplication(packageName)
+                } catch (e: PackageManager.NameNotFoundException) {
+                    e.printStackTrace()
                 }
 
                 // This line automatically shows the VPN system notification
