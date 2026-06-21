@@ -13,15 +13,15 @@ object RealPingTester {
         try {
             android.util.Log.d("RealPingTester", "Attempting HTTP ping via proxy 127.0.0.1:10809...")
             val proxy = Proxy(Proxy.Type.HTTP, InetSocketAddress("127.0.0.1", 10809))
-            // Use Cloudflare IP directly to completely bypass Android DNS resolution bugs
-            val url = URL("http://1.1.1.1/")
+            // Use Google's reliable 204 endpoint over HTTPS
+            val url = URL("https://www.google.com/generate_204")
             
             val connection = url.openConnection(proxy) as HttpURLConnection
-            connection.connectTimeout = 3000
-            connection.readTimeout = 3000
+            connection.connectTimeout = 5000
+            connection.readTimeout = 5000
             connection.useCaches = false
             
-            android.util.Log.d("RealPingTester", "Connecting to 1.1.1.1 via HTTP proxy...")
+            android.util.Log.d("RealPingTester", "Connecting to google.com via HTTP proxy...")
             val responseCode = connection.responseCode
             android.util.Log.d("RealPingTester", "Response Code: $responseCode")
             
