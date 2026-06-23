@@ -47,7 +47,7 @@ object V2rayConfigGenerator {
             put("settings", JSONObject())
         }
         val tunInbound = JSONObject().apply {
-            put("port", 10808) // Port is ignored for tun, but required by schema
+            put("port", 10810) // Port is ignored for tun, but required by schema
             put("listen", "127.0.0.1")
             put("protocol", "tun")
             put("settings", JSONObject().apply {
