@@ -46,8 +46,21 @@ object V2rayConfigGenerator {
             put("protocol", "http")
             put("settings", JSONObject())
         }
+        val tunInbound = JSONObject().apply {
+            put("port", 10808) // Port is ignored for tun, but required by schema
+            put("listen", "127.0.0.1")
+            put("protocol", "tun")
+            put("settings", JSONObject().apply {
+                put("name", "tun0")
+                put("mtu", 1500)
+                put("autoRoute", false)
+                put("strictRoute", false)
+            })
+            put("tag", "tun")
+        }
         inbounds.put(socksInbound)
         inbounds.put(httpInbound)
+        inbounds.put(tunInbound)
         template.put("inbounds", inbounds)
 
         // Explicit empty routing to avoid V2Ray loading default rules that depend on geoip/geosite

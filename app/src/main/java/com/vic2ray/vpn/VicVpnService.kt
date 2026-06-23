@@ -24,9 +24,11 @@ class VicVpnService : VpnService() {
         const val ACTION_CONNECT = "com.vic2ray.vpn.CONNECT"
         const val ACTION_DISCONNECT = "com.vic2ray.vpn.DISCONNECT"
         const val EXTRA_CONFIG = "config"
+        const val EXTRA_RAW_CONFIG = "raw_config"
         
         val isConnected = MutableStateFlow(false)
         val currentPing = MutableStateFlow(-1)
+        val connectedRawConfig = MutableStateFlow<String?>(null)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -34,12 +36,13 @@ class VicVpnService : VpnService() {
         when (intent?.action) {
             ACTION_CONNECT -> {
                 val config = intent.getStringExtra(EXTRA_CONFIG)
+                val rawConfig = intent.getStringExtra(EXTRA_RAW_CONFIG)
                 if (config == null) {
                     Log.e(TAG, "Config is null, stopping")
                     stopSelf()
                     return START_NOT_STICKY
                 }
-                connect(config)
+                connect(config, rawConfig)
             }
             ACTION_DISCONNECT -> {
                 disconnect()
@@ -55,9 +58,10 @@ class VicVpnService : VpnService() {
 
     private val serviceScope = CoroutineScope(Dispatchers.IO)
 
-    private fun connect(jsonConfig: String) {
+    private fun connect(jsonConfig: String, rawConfig: String?) {
         Log.d(TAG, "connect() called")
         disconnect()
+        connectedRawConfig.value = rawConfig
 
         serviceScope.launch {
             try {
@@ -66,6 +70,9 @@ class VicVpnService : VpnService() {
                 builder.setSession("Vic2Ray")
                 // A minimum configuration to establish the VPN interface
                 builder.addAddress("10.0.0.2", 24)
+                builder.addRoute("0.0.0.0", 0) // Route all IPv4 traffic to TUN
+                builder.addDnsServer("8.8.8.8")
+                builder.addDnsServer("1.1.1.1")
                 builder.setMtu(1500)
 
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -83,6 +90,11 @@ class VicVpnService : VpnService() {
                 // This line automatically shows the VPN system notification
                 vpnInterface = builder.establish()
                 Log.d(TAG, "VPN tunnel established: ${vpnInterface != null}")
+                
+                vpnInterface?.fd?.let { fd ->
+                    android.system.Os.setenv("xray.tun.fd", fd.toString(), true)
+                    Log.d(TAG, "Set xray.tun.fd to $fd")
+                }
 
                 Log.d(TAG, "Starting V2Ray core...")
                 try {
@@ -153,6 +165,7 @@ class VicVpnService : VpnService() {
         coreController = null
         isConnected.value = false
         currentPing.value = -1
+        connectedRawConfig.value = null
     }
 
     override fun onDestroy() {

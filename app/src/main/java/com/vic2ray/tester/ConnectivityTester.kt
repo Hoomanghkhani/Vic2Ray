@@ -53,7 +53,7 @@ class ConnectivityTester {
         if (host.isNotEmpty()) {
             try {
                 val socket = Socket()
-                socket.connect(InetSocketAddress(host, port), 2000)
+                socket.connect(InetSocketAddress(host, port), 4500)
                 socket.close()
                 isSuccess = true
             } catch (e: Exception) {

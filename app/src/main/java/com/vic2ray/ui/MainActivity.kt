@@ -52,10 +52,10 @@ class MainActivity : ComponentActivity() {
         setContent {
             MaterialTheme(
                 colorScheme = darkColorScheme(
-                    primary = Color(0xFF00E5FF),
-                    secondary = Color(0xFFB388FF),
-                    background = Color(0xFF0F172A),
-                    surface = Color(0xFF1E293B),
+                    primary = Color(0xFFFFD700), // Gold
+                    secondary = Color(0xFF00E676), // Emerald
+                    background = Color(0xFF0A1128), // Deep Royal Blue background
+                    surface = Color(0xFF16203B), // Slightly lighter royal blue
                     error = Color(0xFFFF5252)
                 )
             ) {
@@ -68,10 +68,11 @@ class MainActivity : ComponentActivity() {
 /**
  * Safe start of VPN Service
  */
-private fun safeStartVpnService(context: Context, jsonConfig: String) {
+private fun safeStartVpnService(context: Context, jsonConfig: String, rawConfig: String) {
     val intent = Intent(context, VicVpnService::class.java).apply {
         action = VicVpnService.ACTION_CONNECT
         putExtra(VicVpnService.EXTRA_CONFIG, jsonConfig)
+        putExtra(VicVpnService.EXTRA_RAW_CONFIG, rawConfig)
     }
     try {
         // VpnService only needs startService, NOT startForegroundService.
@@ -93,17 +94,18 @@ fun Vic2rayApp(mainViewModel: MainViewModel = viewModel()) {
     
     val isVpnConnected by VicVpnService.isConnected.collectAsState()
     val currentPing by VicVpnService.currentPing.collectAsState()
+    val connectedRawConfig by VicVpnService.connectedRawConfig.collectAsState()
     val scope = rememberCoroutineScope()
 
     val context = LocalContext.current
-    var pendingVpnConfig by remember { mutableStateOf<String?>(null) }
+    var pendingVpnConfig by remember { mutableStateOf<Pair<String, String>?>(null) }
 
     val vpnPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
     ) { result ->
         if (result.resultCode == android.app.Activity.RESULT_OK) {
             pendingVpnConfig?.let { config ->
-                safeStartVpnService(context, config)
+                safeStartVpnService(context, config.first, config.second)
             }
         } else {
             Toast.makeText(context, "VPN Permission Denied!", Toast.LENGTH_SHORT).show()
@@ -131,7 +133,7 @@ fun Vic2rayApp(mainViewModel: MainViewModel = viewModel()) {
                             modifier = Modifier
                                 .size(36.dp)
                                 .clip(RoundedCornerShape(12.dp))
-                                .background(Brush.linearGradient(listOf(Color(0xFF00E5FF), Color(0xFFB388FF)))),
+                                .background(Brush.linearGradient(listOf(Color(0xFFFFD700), Color(0xFFFFA000)))),
                             contentAlignment = Alignment.Center
                         ) {
                             Text("V", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 20.sp)
@@ -304,9 +306,10 @@ fun Vic2rayApp(mainViewModel: MainViewModel = viewModel()) {
                                 selectedProtocol = selectedProtocol,
                                 isRefreshing = true,
                                 onRefresh = { },
-                                onConnect = { jsonConfig ->
-                                    handleConnect(context, jsonConfig, vpnPermissionLauncher) { pendingVpnConfig = it }
-                                }
+                                onConnect = { jsonConfig, rawConfig ->
+                                    handleConnect(context, jsonConfig, rawConfig, vpnPermissionLauncher) { pendingVpnConfig = it }
+                                },
+                                connectedRawConfig = connectedRawConfig
                             )
                         }
                     }
@@ -339,9 +342,10 @@ fun Vic2rayApp(mainViewModel: MainViewModel = viewModel()) {
                                 selectedProtocol = selectedProtocol,
                                 isRefreshing = false,
                                 onRefresh = { mainViewModel.syncAndTestServers() },
-                                onConnect = { jsonConfig ->
-                                    handleConnect(context, jsonConfig, vpnPermissionLauncher) { pendingVpnConfig = it }
-                                }
+                                onConnect = { jsonConfig, rawConfig ->
+                                    handleConnect(context, jsonConfig, rawConfig, vpnPermissionLauncher) { pendingVpnConfig = it }
+                                },
+                                connectedRawConfig = connectedRawConfig
                             )
                         }
                     }
@@ -354,16 +358,17 @@ fun Vic2rayApp(mainViewModel: MainViewModel = viewModel()) {
 private fun handleConnect(
     context: Context,
     jsonConfig: String,
+    rawConfig: String,
     vpnPermissionLauncher: androidx.activity.result.ActivityResultLauncher<Intent>,
-    setPendingConfig: (String) -> Unit
+    setPendingConfig: (Pair<String, String>) -> Unit
 ) {
     try {
         val vpnIntent = android.net.VpnService.prepare(context)
         if (vpnIntent != null) {
-            setPendingConfig(jsonConfig)
+            setPendingConfig(Pair(jsonConfig, rawConfig))
             vpnPermissionLauncher.launch(vpnIntent)
         } else {
-            safeStartVpnService(context, jsonConfig)
+            safeStartVpnService(context, jsonConfig, rawConfig)
         }
     } catch (e: Exception) {
         Toast.makeText(context, "Error: ${e.message}", Toast.LENGTH_LONG).show()
@@ -457,16 +462,6 @@ fun AboutDialog(onDismiss: () -> Unit) {
                 Spacer(modifier = Modifier.height(16.dp))
                 
                 Button(
-                    onClick = { uriHandler.openUri("https://daramet.com/hoomanghkhani") },
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
-                ) {
-                    Text("Donate (Daramet)", color = Color.Black, fontWeight = FontWeight.Bold)
-                }
-                
-                Spacer(modifier = Modifier.height(8.dp))
-                
-                Button(
                     onClick = { uriHandler.openUri("https://github.com/Hoomanghkhani/") },
                     modifier = Modifier.fillMaxWidth(),
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF333333))
@@ -510,7 +505,8 @@ fun ConfigList(
     selectedProtocol: ProtocolType,
     isRefreshing: Boolean,
     onRefresh: () -> Unit,
-    onConnect: (String) -> Unit
+    onConnect: (String, String) -> Unit,
+    connectedRawConfig: String?
 ) {
     val filteredList = allConfigs.filter { it.protocol == selectedProtocol }
     val pullRefreshState = rememberPullRefreshState(refreshing = isRefreshing, onRefresh = onRefresh)
@@ -530,7 +526,11 @@ fun ConfigList(
                 contentPadding = PaddingValues(bottom = 80.dp)
             ) {
                 items(filteredList) { config ->
-                    ConfigItemCard(config = config, onConnect = onConnect)
+                    ConfigItemCard(
+                        config = config, 
+                        isConnected = config.rawConfig == connectedRawConfig,
+                        onConnect = onConnect
+                    )
                 }
             }
         }
@@ -546,7 +546,7 @@ fun ConfigList(
 }
 
 @Composable
-fun ConfigItemCard(config: VpnConfig, onConnect: (String) -> Unit) {
+fun ConfigItemCard(config: VpnConfig, isConnected: Boolean, onConnect: (String, String) -> Unit) {
     val context = LocalContext.current
 
     Card(
@@ -557,12 +557,13 @@ fun ConfigItemCard(config: VpnConfig, onConnect: (String) -> Unit) {
             .clickable {
                 try {
                     val jsonConfig = V2rayConfigGenerator.generateJsonConfig(config.rawConfig, config.protocol)
-                    onConnect(jsonConfig)
+                    onConnect(jsonConfig, config.rawConfig)
                 } catch (e: Exception) {
                     Toast.makeText(context, "Config parse error: ${e.message}", Toast.LENGTH_LONG).show()
                 }
             },
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = if (isConnected) androidx.compose.foundation.BorderStroke(2.dp, MaterialTheme.colorScheme.primary) else null,
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
         Box(
@@ -585,13 +586,19 @@ fun ConfigItemCard(config: VpnConfig, onConnect: (String) -> Unit) {
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = config.name,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White,
-                        maxLines = 1
-                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (isConnected) {
+                            Box(modifier = Modifier.size(8.dp).clip(androidx.compose.foundation.shape.CircleShape).background(MaterialTheme.colorScheme.primary))
+                            Spacer(modifier = Modifier.width(8.dp))
+                        }
+                        Text(
+                            text = config.name,
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White,
+                            maxLines = 1
+                        )
+                    }
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
                         text = config.protocol.name,
