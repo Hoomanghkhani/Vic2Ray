@@ -13,9 +13,7 @@ import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.item
+import androidx.compose.foundation.lazy.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.ExperimentalMaterialApi
@@ -429,7 +427,7 @@ fun AboutDialog(onDismiss: () -> Unit) {
                 }
                 Spacer(modifier = Modifier.height(12.dp))
                 Text("Vic2Ray", color = Color.White, fontWeight = FontWeight.Black, fontSize = 24.sp)
-                Text("v1.0.18 Stable", color = Color.Gray, fontSize = 12.sp)
+                Text("v1.0.19 Stable", color = Color.Gray, fontSize = 12.sp)
             }
         },
         text = {
@@ -437,7 +435,7 @@ fun AboutDialog(onDismiss: () -> Unit) {
                 Text("Crafted with passion for freedom.", color = Color.LightGray, fontSize = 14.sp, textAlign = TextAlign.Center)
                 Spacer(modifier = Modifier.height(24.dp))
                 
-                AboutLinkItem("Hooman Ghardashkhani", "https://github.com/Hoomanghkhani/", Icons.Default.Person)
+                AboutLinkItem("Hooman Ghardashkhani", "https://hoomanghkhani.github.io/", Icons.Default.Person)
                 Spacer(modifier = Modifier.height(12.dp))
                 AboutLinkItem("GitHub Repository", "https://github.com/Hoomanghkhani/", Icons.Default.Share)
                 Spacer(modifier = Modifier.height(12.dp))
