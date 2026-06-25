@@ -8,30 +8,35 @@ import java.net.Proxy
 import java.net.URL
 
 object RealPingTester {
-    suspend fun testCurrentConnectionPing(): Int = withContext(Dispatchers.IO) {
+    /**
+     * تست پینگ واقعی از طریق پروکسی محلی SOCKS
+     * این متد تلاش می‌کند یک درخواست HTTP به کلودفلر ارسال کند.
+     * اگر موفقیت‌آمیز باشد، یعنی پروکسی واقعاً کار می‌کند.
+     */
+    suspend fun testProxyPing(port: Int = 10808): Int = withContext(Dispatchers.IO) {
         val startTime = System.currentTimeMillis()
         try {
-            android.util.Log.d("RealPingTester", "Attempting ping via SOCKS proxy 127.0.0.1:10808...")
-            val proxy = Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", 10808))
-            // Use Cloudflare's HTTP 204 endpoint to avoid SSL negotiation overhead and CONNECT issues
-            val url = URL("http://cp.cloudflare.com/generate_204")
+            val proxy = Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", port))
+            // استفاده از HTTPS برای جلوگیری از محدودیت‌های Cleartext در اندروید
+            val url = URL("https://cp.cloudflare.com/generate_204")
             
             val connection = url.openConnection(proxy) as HttpURLConnection
-            connection.connectTimeout = 5000
-            connection.readTimeout = 5000
+            connection.connectTimeout = 4000 // 4 seconds
+            connection.readTimeout = 4000
             connection.useCaches = false
             
-            android.util.Log.d("RealPingTester", "Connecting to cloudflare.com via SOCKS proxy...")
             val responseCode = connection.responseCode
-            android.util.Log.d("RealPingTester", "Response Code: $responseCode")
-            
-            val endTime = System.currentTimeMillis()
-            val ping = (endTime - startTime).toInt()
-            android.util.Log.d("RealPingTester", "Ping success: $ping ms")
-            return@withContext ping
+            if (responseCode >= 200 && responseCode < 400) {
+                val endTime = System.currentTimeMillis()
+                return@withContext (endTime - startTime).toInt()
+            } else {
+                return@withContext -1
+            }
         } catch (e: Exception) {
-            android.util.Log.e("RealPingTester", "Ping failed! Exception: ${e.javaClass.simpleName}, Message: ${e.message}")
             return@withContext -1
         }
     }
+    
+    // Legacy support for VicVpnService
+    suspend fun testCurrentConnectionPing(): Int = testProxyPing(10808)
 }

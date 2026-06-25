@@ -70,10 +70,12 @@ class VicVpnService : VpnService() {
                 builder.setSession("Vic2Ray")
                 // A minimum configuration to establish the VPN interface
                 builder.addAddress("10.0.0.2", 24)
-                builder.addRoute("0.0.0.0", 0) // Route all IPv4 traffic to TUN
-                builder.addDnsServer("8.8.8.8")
+                builder.addRoute("0.0.0.0", 0)
+                builder.addRoute("::", 0)
                 builder.addDnsServer("1.1.1.1")
+                builder.addDnsServer("8.8.8.8")
                 builder.setMtu(1500)
+                builder.setBlocking(false)
 
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                     builder.setHttpProxy(ProxyInfo.buildDirectProxy("127.0.0.1", 10809))

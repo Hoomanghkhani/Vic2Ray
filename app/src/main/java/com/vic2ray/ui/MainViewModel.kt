@@ -116,6 +116,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun syncAndTestServers() {
         if (syncJob?.isActive == true) return
 
+        val connectivityManager = getApplication<Application>().getSystemService(Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
+        val networkInfo = connectivityManager.activeNetworkInfo
+        if (networkInfo == null || !networkInfo.isConnected) {
+            _uiState.value = UiState.Error("No internet connection. Please check your network and try again.")
+            return
+        }
+
         syncJob = viewModelScope.launch {
             _allConfigs.value = emptyList()
             _uiState.value = UiState.Loading("Fetching configs...")

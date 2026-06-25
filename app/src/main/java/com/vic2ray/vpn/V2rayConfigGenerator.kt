@@ -37,7 +37,8 @@ object V2rayConfigGenerator {
             })
             put("sniffing", JSONObject().apply {
                 put("enabled", true)
-                put("destOverride", JSONArray().put("http").put("tls"))
+                put("destOverride", JSONArray().put("http").put("tls").put("quic"))
+                put("metadataOnly", false)
             })
         }
         val httpInbound = JSONObject().apply {
@@ -45,9 +46,14 @@ object V2rayConfigGenerator {
             put("listen", "127.0.0.1")
             put("protocol", "http")
             put("settings", JSONObject())
+            put("sniffing", JSONObject().apply {
+                put("enabled", true)
+                put("destOverride", JSONArray().put("http").put("tls").put("quic"))
+                put("metadataOnly", false)
+            })
         }
         val tunInbound = JSONObject().apply {
-            put("port", 10810) // Port is ignored for tun, but required by schema
+            put("port", 10810)
             put("listen", "127.0.0.1")
             put("protocol", "tun")
             put("settings", JSONObject().apply {
@@ -56,6 +62,11 @@ object V2rayConfigGenerator {
                 put("autoRoute", false)
                 put("strictRoute", false)
             })
+            put("sniffing", JSONObject().apply {
+                put("enabled", true)
+                put("destOverride", JSONArray().put("http").put("tls").put("quic"))
+                put("metadataOnly", false)
+            })
             put("tag", "tun")
         }
         inbounds.put(socksInbound)
@@ -63,10 +74,44 @@ object V2rayConfigGenerator {
         inbounds.put(tunInbound)
         template.put("inbounds", inbounds)
 
-        // Explicit empty routing to avoid V2Ray loading default rules that depend on geoip/geosite
+        // DNS Configuration
+        template.put("dns", JSONObject().apply {
+            put("servers", JSONArray().apply {
+                put("1.1.1.1")
+                put("8.8.8.8")
+                put("https://dns.google/dns-query")
+                put("localhost")
+            })
+        })
+
+        // Explicit routing
         template.put("routing", JSONObject().apply {
-            put("domainStrategy", "AsIs")
-            put("rules", JSONArray())
+            put("domainStrategy", "IPIfNonMatch")
+            val rules = JSONArray()
+            
+            // DNS rule: Force all traffic on port 53 to use internal DNS
+            rules.put(JSONObject().apply {
+                put("type", "field")
+                put("port", "53")
+                put("outboundTag", "dns-out")
+            })
+
+            // Local traffic rule: Ensure local network traffic stays local without geoip.dat
+            rules.put(JSONObject().apply {
+                put("type", "field")
+                put("ip", JSONArray().apply {
+                    put("127.0.0.0/8")
+                    put("10.0.0.0/8")
+                    put("172.16.0.0/12")
+                    put("192.168.0.0/16")
+                    put("::1/128")
+                    put("fc00::/7")
+                    put("fe80::/10")
+                })
+                put("outboundTag", "direct")
+            })
+            
+            put("rules", rules)
         })
 
         return template
@@ -75,6 +120,10 @@ object V2rayConfigGenerator {
     private fun addOutbounds(template: JSONObject, proxyOutbound: JSONObject) {
         val outbounds = JSONArray()
         outbounds.put(proxyOutbound)
+        outbounds.put(JSONObject().apply {
+            put("protocol", "dns")
+            put("tag", "dns-out")
+        })
         outbounds.put(JSONObject().apply {
             put("protocol", "freedom")
             put("tag", "direct")
@@ -285,9 +334,6 @@ object V2rayConfigGenerator {
             base64Part = base64Part.substring(0, hashIndex)
         }
 
-        // SS format 1: ss://base64(method:password)@hostname:port
-        // SS format 2: ss://base64(method:password@hostname:port)
-        
         var method = ""
         var password = ""
         var add = ""
@@ -295,28 +341,54 @@ object V2rayConfigGenerator {
 
         try {
             if (base64Part.contains("@")) {
+                // Format: ss://method:password@host:port
+                // OR ss://base64(method:password)@host:port
                 val parts = base64Part.split("@")
-                val decodedCreds = String(Base64.decode(parts[0], Base64.DEFAULT), Charsets.UTF_8)
-                val credParts = decodedCreds.split(":")
-                method = credParts[0]
-                password = credParts[1]
-                
-                val serverParts = parts[1].split(":")
-                add = serverParts[0]
-                port = serverParts[1].toInt()
+                val userInfo = parts[0]
+                val serverInfo = parts[1]
+
+                if (userInfo.contains(":")) {
+                    val userParts = userInfo.split(":")
+                    method = userParts[0]
+                    password = userParts[1]
+                } else {
+                    val decodedUserInfo = String(Base64.decode(userInfo, Base64.DEFAULT), Charsets.UTF_8)
+                    if (decodedUserInfo.contains(":")) {
+                        val userParts = decodedUserInfo.split(":")
+                        method = userParts[0]
+                        password = userParts[1]
+                    }
+                }
+
+                if (serverInfo.contains(":")) {
+                    val serverParts = serverInfo.split(":")
+                    add = serverParts[0]
+                    port = serverParts[1].toIntOrNull() ?: 443
+                }
             } else {
+                // Format: ss://base64(method:password@host:port)
                 val decoded = String(Base64.decode(base64Part, Base64.DEFAULT), Charsets.UTF_8)
                 val atIndex = decoded.lastIndexOf("@")
-                val creds = decoded.substring(0, atIndex)
-                val server = decoded.substring(atIndex + 1)
-                
-                val credParts = creds.split(":")
-                method = credParts[0]
-                password = credParts[1]
-                
-                val serverParts = server.split(":")
-                add = serverParts[0]
-                port = serverParts[1].toInt()
+                if (atIndex != -1) {
+                    val creds = decoded.substring(0, atIndex)
+                    val server = decoded.substring(atIndex + 1)
+                    
+                    if (creds.contains(":")) {
+                        val credParts = creds.split(":")
+                        method = credParts[0]
+                        password = credParts[1]
+                    }
+                    
+                    if (server.contains(":")) {
+                        val serverParts = server.split(":")
+                        add = serverParts[0]
+                        port = serverParts[1].toIntOrNull() ?: 443
+                    }
+                }
+            }
+            
+            if (method.isEmpty() || add.isEmpty() || port == 0) {
+                throw IllegalArgumentException("Malformed SS link")
             }
         } catch (e: Exception) {
             throw IllegalArgumentException("فرمت لینک Shadowsocks نامعتبر است.")

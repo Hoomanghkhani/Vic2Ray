@@ -1,69 +1,50 @@
 package com.vic2ray.tester
 
 import com.vic2ray.models.VpnConfig
-import com.vic2ray.models.ProtocolType
+import com.vic2ray.vpn.V2rayConfigGenerator
 import kotlinx.coroutines.*
-import java.net.InetSocketAddress
-import java.net.Socket
-import android.net.Uri
-import android.util.Base64
-import org.json.JSONObject
+import libv2ray.Libv2ray
+import java.util.concurrent.atomic.AtomicInteger
 
 class ConnectivityTester {
+    private val nextPort = AtomicInteger(11000)
 
     /**
-     * تست پینگ ساده سرور برای بررسی زنده بودن (تایم اوت ۲ ثانیه).
-     * نکته: در یک اپلیکیشن واقعی باید با خود Core تست شود. در اینجا پینگ ساده به هاست/پورت یا فقط شبیه‌سازی انجام می‌شود.
+     * تست پینگ واقعی سرور با اجرای موقت هسته Xray
+     * این متد هسته را برای هر سرور به صورت مجزا استارت کرده و یک درخواست واقعی ارسال می‌کند.
      */
-    suspend fun testConfig(config: VpnConfig): VpnConfig = withContext(Dispatchers.IO) {
-        var host = ""
-        var port = 443
-
-        try {
-            when (config.protocol) {
-                ProtocolType.VMESS -> {
-                    val base64Part = config.rawConfig.removePrefix("vmess://")
-                    val jsonString = String(Base64.decode(base64Part, Base64.DEFAULT), Charsets.UTF_8)
-                    val json = JSONObject(jsonString)
-                    host = json.optString("add", "")
-                    port = json.optString("port", "443").toIntOrNull() ?: 443
-                }
-                else -> {
-                    val uri = Uri.parse(config.rawConfig)
-                    var uriHost = uri.host ?: ""
-                    // Handle case where URI parsing fails (e.g. missing '//' or bad password)
-                    if (uriHost.isEmpty() && config.rawConfig.contains("@")) {
-                        val partAfterAt = config.rawConfig.substringAfter("@")
-                        uriHost = partAfterAt.substringBefore(":")
-                        val portStr = partAfterAt.substringAfter(":").substringBefore("?")
-                        port = portStr.toIntOrNull() ?: 443
-                    }
-                    host = uriHost
-                    if (uri.port > 0) port = uri.port
-                }
-            }
-        } catch (e: Exception) {
-            // parsing failed
-        }
-
-        var isSuccess = false
+    suspend fun testConfigReal(config: VpnConfig): VpnConfig = withContext(Dispatchers.IO) {
+        val testPort = nextPort.getAndIncrement()
         var pingResult = -1
-        val startTime = System.currentTimeMillis()
+        var isSuccess = false
+        
+        try {
+            // تولید کانفیگ JSON برای تست با پورت اختصاصی
+            val fullConfigJson = V2rayConfigGenerator.generateJsonConfig(config.rawConfig, config.protocol)
+            // تغییر پورت پیش‌فرض ۱۰۸۰۸ به پورت تست اختصاصی برای جلوگیری از تداخل
+            val testConfigJson = fullConfigJson.replace("10808", testPort.toString())
 
-        if (host.isNotEmpty()) {
-            try {
-                val socket = Socket()
-                socket.connect(InetSocketAddress(host, port), 4500)
-                socket.close()
-                isSuccess = true
-            } catch (e: Exception) {
-                isSuccess = false
+            val callback = object : libv2ray.CoreCallbackHandler {
+                override fun onEmitStatus(status: Long, message: String?): Long = 0
+                override fun shutdown(): Long = 0
+                override fun startup(): Long = 0
             }
-        }
-
-        val endTime = System.currentTimeMillis()
-        if (isSuccess) {
-            pingResult = (endTime - startTime).toInt()
+            
+            val core = Libv2ray.newCoreController(callback)
+            // استارت هسته روی پورت تست
+            core.startLoop(testConfigJson, 0)
+            
+            // صبر کوتاه برای بالا آمدن سرویس پروکسی
+            delay(500)
+            
+            // انجام تست HTTP واقعی از طریق پورت تست
+            pingResult = RealPingTester.testProxyPing(testPort)
+            isSuccess = pingResult > 0
+            
+            // توقف هسته پس از اتمام تست
+            core.stopLoop()
+        } catch (e: Exception) {
+            android.util.Log.e("ConnectivityTester", "Error testing ${config.name}: ${e.message}")
         }
 
         config.copy(
@@ -73,18 +54,17 @@ class ConnectivityTester {
     }
 
     /**
-     * تست تمامی سرورها به صورت موازی (Parallel)
+     * تست تمامی سرورها به صورت موازی با پینگ واقعی
      */
     suspend fun testAllStreaming(
         configs: List<VpnConfig>,
         onResult: (VpnConfig) -> Unit
     ) = withContext(Dispatchers.IO) {
-        // ایجاد جاب‌های موازی با محدودیت اجرای همزمان (استفاده از async)
-        // برای جلوگیری از کرش سیستم، کانکشن‌ها در دسته‌های 50 تایی اجرا می‌شوند
-        configs.chunked(50).forEach { chunk ->
+        // برای جلوگیری از مصرف بیش از حد رم و CPU، تست‌ها در دسته‌های ۸ تایی اجرا می‌شوند
+        configs.chunked(8).forEach { chunk ->
             val deferreds = chunk.map { config ->
                 async {
-                    val result = testConfig(config)
+                    val result = testConfigReal(config)
                     if (result.isWorking) {
                         withContext(Dispatchers.Main) {
                             onResult(result)

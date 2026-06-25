@@ -69,17 +69,27 @@ class ConfigParser {
                 }
                 ProtocolType.VLESS, ProtocolType.TROJAN -> {
                     // فرمت: protocol://uuid@host:port?params#name
-                    val hashIndex = url.indexOf("#")
+                    val hashIndex = url.lastIndexOf("#")
                     if (hashIndex != -1 && hashIndex < url.length - 1) {
+                        val rawName = url.substring(hashIndex + 1)
                         // URL Decoder
-                        return java.net.URLDecoder.decode(url.substring(hashIndex + 1), "UTF-8")
+                        return try {
+                            java.net.URLDecoder.decode(rawName, "UTF-8")
+                        } catch (e: Exception) {
+                            rawName
+                        }
                     }
                     return "${protocol.name} Server"
                 }
                 ProtocolType.SS -> {
-                    val hashIndex = url.indexOf("#")
+                    val hashIndex = url.lastIndexOf("#")
                     if (hashIndex != -1 && hashIndex < url.length - 1) {
-                        return java.net.URLDecoder.decode(url.substring(hashIndex + 1), "UTF-8")
+                        val rawName = url.substring(hashIndex + 1)
+                        return try {
+                            java.net.URLDecoder.decode(rawName, "UTF-8")
+                        } catch (e: Exception) {
+                            rawName
+                        }
                     }
                     return "Shadowsocks Server"
                 }
