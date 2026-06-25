@@ -74,7 +74,7 @@ class VicVpnService : VpnService() {
                 builder.addRoute("::", 0)
                 builder.addDnsServer("1.1.1.1")
                 builder.addDnsServer("8.8.8.8")
-                builder.setMtu(1500)
+                builder.setMtu(1400)
                 builder.setBlocking(false)
 
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {

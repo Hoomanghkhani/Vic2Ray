@@ -15,6 +15,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.item
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.ExperimentalMaterialApi
@@ -428,7 +429,7 @@ fun AboutDialog(onDismiss: () -> Unit) {
                 }
                 Spacer(modifier = Modifier.height(12.dp))
                 Text("Vic2Ray", color = Color.White, fontWeight = FontWeight.Black, fontSize = 24.sp)
-                Text("v1.0.15 Stable", color = Color.Gray, fontSize = 12.sp)
+                Text("v1.0.18 Stable", color = Color.Gray, fontSize = 12.sp)
             }
         },
         text = {
@@ -484,15 +485,26 @@ fun ConfigList(
     val pullRefreshState = rememberPullRefreshState(refreshing = isRefreshing, onRefresh = onRefresh)
 
     Box(modifier = Modifier.fillMaxSize().pullRefresh(pullRefreshState)) {
-        if (configs.isEmpty() && !isRefreshing) {
-            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text("No servers available.\nPull down to discover.", color = Color.Gray, textAlign = TextAlign.Center)
-            }
-        } else {
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(top = 8.dp, bottom = 100.dp)
-            ) {
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(top = 8.dp, bottom = 100.dp)
+        ) {
+            if (configs.isEmpty() && !isRefreshing) {
+                item {
+                    Box(
+                        modifier = Modifier
+                            .fillParentMaxSize()
+                            .padding(bottom = 100.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            "No servers available.\nPull down to discover.",
+                            color = Color.Gray,
+                            textAlign = TextAlign.Center
+                        )
+                    }
+                }
+            } else {
                 items(configs) { config ->
                     ConfigItemCard(
                         config = config, 

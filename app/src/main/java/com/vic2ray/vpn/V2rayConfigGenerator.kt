@@ -58,13 +58,14 @@ object V2rayConfigGenerator {
             put("protocol", "tun")
             put("settings", JSONObject().apply {
                 put("name", "tun0")
-                put("mtu", 1500)
+                put("mtu", 1400)
                 put("autoRoute", false)
                 put("strictRoute", false)
+                put("stack", "system")
             })
             put("sniffing", JSONObject().apply {
                 put("enabled", true)
-                put("destOverride", JSONArray().put("http").put("tls").put("quic"))
+                put("destOverride", JSONArray().put("http").put("tls").put("quic").put("fakedns"))
                 put("metadataOnly", false)
             })
             put("tag", "tun")
@@ -74,14 +75,18 @@ object V2rayConfigGenerator {
         inbounds.put(tunInbound)
         template.put("inbounds", inbounds)
 
-        // DNS Configuration
+        // DNS Configuration with FakeDNS
         template.put("dns", JSONObject().apply {
-            put("servers", JSONArray().apply {
-                put("1.1.1.1")
-                put("8.8.8.8")
-                put("https://dns.google/dns-query")
-                put("localhost")
+            val servers = JSONArray()
+            servers.put(JSONObject().apply {
+                put("address", "1.1.1.1")
+                put("port", 53)
+                put("domains", JSONArray().put("geosite:google"))
             })
+            servers.put("8.8.8.8")
+            servers.put("https://dns.google/dns-query")
+            servers.put("fakedns")
+            put("servers", servers)
         })
 
         // Explicit routing
@@ -89,14 +94,22 @@ object V2rayConfigGenerator {
             put("domainStrategy", "IPIfNonMatch")
             val rules = JSONArray()
             
-            // DNS rule: Force all traffic on port 53 to use internal DNS
+            // DNS rule
             rules.put(JSONObject().apply {
                 put("type", "field")
+                put("inboundTag", JSONArray().put("tun").put("socks").put("http"))
                 put("port", "53")
                 put("outboundTag", "dns-out")
             })
 
-            // Local traffic rule: Ensure local network traffic stays local without geoip.dat
+            // FakeDNS rule
+            rules.put(JSONObject().apply {
+                put("type", "field")
+                put("protocol", JSONArray().put("bittorrent"))
+                put("outboundTag", "direct")
+            })
+
+            // Local traffic rule
             rules.put(JSONObject().apply {
                 put("type", "field")
                 put("ip", JSONArray().apply {
