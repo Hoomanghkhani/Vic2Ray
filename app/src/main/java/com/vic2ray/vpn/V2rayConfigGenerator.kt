@@ -9,17 +9,17 @@ import java.net.URLDecoder
 
 object V2rayConfigGenerator {
     
-    fun generateJsonConfig(rawConfig: String, protocol: ProtocolType): String {
+    fun generateJsonConfig(rawConfig: String, protocol: ProtocolType, forTest: Boolean = false): String {
         return when (protocol) {
-            ProtocolType.VMESS -> buildVmessJson(rawConfig)
-            ProtocolType.VLESS -> buildVlessJson(rawConfig)
-            ProtocolType.TROJAN -> buildTrojanJson(rawConfig)
-            ProtocolType.SS -> buildShadowsocksJson(rawConfig)
+            ProtocolType.VMESS -> buildVmessJson(rawConfig, forTest)
+            ProtocolType.VLESS -> buildVlessJson(rawConfig, forTest)
+            ProtocolType.TROJAN -> buildTrojanJson(rawConfig, forTest)
+            ProtocolType.SS -> buildShadowsocksJson(rawConfig, forTest)
             else -> throw IllegalArgumentException("پروتکل ${protocol.name} در حال حاضر پشتیبانی نمی‌شود.")
         }
     }
 
-    private fun getBaseTemplate(): JSONObject {
+    private fun getBaseTemplate(forTest: Boolean): JSONObject {
         val template = JSONObject()
         
         template.put("log", JSONObject().apply {
@@ -37,47 +37,64 @@ object V2rayConfigGenerator {
             })
             put("sniffing", JSONObject().apply {
                 put("enabled", true)
-                put("destOverride", JSONArray().put("http").put("tls").put("quic"))
-                put("metadataOnly", false)
-            })
-        }
-        val httpInbound = JSONObject().apply {
-            put("port", 10809)
-            put("listen", "127.0.0.1")
-            put("protocol", "http")
-            put("settings", JSONObject())
-            put("sniffing", JSONObject().apply {
-                put("enabled", true)
-                put("destOverride", JSONArray().put("http").put("tls").put("quic"))
-                put("metadataOnly", false)
-            })
-        }
-        val tunInbound = JSONObject().apply {
-            put("port", 10810)
-            put("listen", "127.0.0.1")
-            put("protocol", "tun")
-            put("settings", JSONObject().apply {
-                put("name", "tun0")
-                put("mtu", 1400)
-                put("autoRoute", false)
-                put("strictRoute", false)
-                put("stack", "system")
-            })
-            put("sniffing", JSONObject().apply {
-                put("enabled", true)
                 put("destOverride", JSONArray().put("http").put("tls").put("quic").put("fakedns"))
                 put("metadataOnly", false)
             })
-            put("tag", "tun")
         }
         inbounds.put(socksInbound)
-        inbounds.put(httpInbound)
-        inbounds.put(tunInbound)
+
+        // Only add HTTP and TUN inbounds if it's NOT for testing
+        if (!forTest) {
+            val httpInbound = JSONObject().apply {
+                put("port", 10809)
+                put("listen", "127.0.0.1")
+                put("protocol", "http")
+                put("settings", JSONObject())
+                put("sniffing", JSONObject().apply {
+                    put("enabled", true)
+                    put("destOverride", JSONArray().put("http").put("tls").put("quic").put("fakedns"))
+                    put("metadataOnly", false)
+                })
+            }
+            val tunInbound = JSONObject().apply {
+                put("protocol", "tun")
+                put("settings", JSONObject().apply {
+                    put("name", "tun0")
+                    put("mtu", 1400)
+                    put("address", JSONArray().put("10.0.0.1/24"))
+                    put("autoRoute", false)
+                    put("strictRoute", false)
+                    put("stack", "gvisor")
+                    put("fd", -1)
+                    put("androidTunFd", -1)
+                    put("tunFd", -1)
+                    put("tun-fd", -1)
+                })
+                put("sniffing", JSONObject().apply {
+                    put("enabled", true)
+                    put("destOverride", JSONArray().put("http").put("tls").put("quic").put("fakedns"))
+                    put("metadataOnly", false)
+                })
+                put("tag", "tun")
+            }
+            inbounds.put(httpInbound)
+            inbounds.put(tunInbound)
+        }
+        
         template.put("inbounds", inbounds)
+
+        // FakeDNS configuration
+        val fakeDnsArray = JSONArray()
+        fakeDnsArray.put(JSONObject().apply {
+            put("ipPool", "198.18.0.0/15")
+            put("poolSize", 65535)
+        })
+        template.put("fakedns", fakeDnsArray)
 
         // DNS Configuration with FakeDNS
         template.put("dns", JSONObject().apply {
             val servers = JSONArray()
+            servers.put("fakedns")
             servers.put(JSONObject().apply {
                 put("address", "1.1.1.1")
                 put("port", 53)
@@ -85,8 +102,9 @@ object V2rayConfigGenerator {
             })
             servers.put("8.8.8.8")
             servers.put("https://dns.google/dns-query")
-            servers.put("fakedns")
             put("servers", servers)
+            // PREFER IPv4 to avoid IPv6 connection refused issues
+            put("queryStrategy", "UseIPv4")
         })
 
         // Explicit routing
@@ -197,10 +215,33 @@ object V2rayConfigGenerator {
         return streamSettings
     }
 
-    private fun buildVmessJson(vmessUrl: String): String {
-        val base64Part = vmessUrl.removePrefix("vmess://")
-        val jsonString = String(Base64.decode(base64Part, Base64.DEFAULT), Charsets.UTF_8)
-        val vmessParams = JSONObject(jsonString)
+    private fun buildVmessJson(vmessUrl: String, forTest: Boolean): String {
+        var base64Part = vmessUrl.removePrefix("vmess://")
+        
+        // Remove everything after # if exists (remarks in URI)
+        val hashIndex = base64Part.indexOf("#")
+        if (hashIndex != -1) {
+            base64Part = base64Part.substring(0, hashIndex)
+        }
+
+        val jsonString = try {
+            String(Base64.decode(base64Part, Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING), Charsets.UTF_8)
+        } catch (e: Exception) {
+            // Fallback to default decode if URL_SAFE fails
+            String(Base64.decode(base64Part, Base64.DEFAULT), Charsets.UTF_8)
+        }
+        
+        val vmessParams = try {
+            JSONObject(jsonString)
+        } catch (e: Exception) {
+            // If it's still not a valid JSON, try to fix common truncation issues in remarks
+            if (jsonString.contains("\"ps\":\"")) {
+                val fixedJson = jsonString.substringBefore(",\"ps\":") + "}"
+                JSONObject(fixedJson)
+            } else {
+                throw e
+            }
+        }
 
         val add = vmessParams.optString("add")
         val port = vmessParams.optString("port").toIntOrNull() ?: 443
@@ -218,7 +259,7 @@ object V2rayConfigGenerator {
         val sid = vmessParams.optString("sid", "")
         val spx = vmessParams.optString("spx", "")
 
-        val template = getBaseTemplate()
+        val template = getBaseTemplate(forTest)
         
         val proxyOutbound = JSONObject().apply {
             put("protocol", "vmess")
@@ -240,7 +281,7 @@ object V2rayConfigGenerator {
         return template.toString()
     }
 
-    private fun buildVlessJson(vlessUrl: String): String {
+    private fun buildVlessJson(vlessUrl: String, forTest: Boolean): String {
         val withoutScheme = vlessUrl.removePrefix("vless://")
         val atIndex = withoutScheme.indexOf("@")
         
@@ -271,7 +312,7 @@ object V2rayConfigGenerator {
         val spx = uri.getQueryParameter("spx") ?: ""
         val alpn = uri.getQueryParameter("alpn") ?: ""
 
-        val template = getBaseTemplate()
+        val template = getBaseTemplate(forTest)
 
         val proxyOutbound = JSONObject().apply {
             put("protocol", "vless")
@@ -293,7 +334,7 @@ object V2rayConfigGenerator {
         return template.toString()
     }
 
-    private fun buildTrojanJson(trojanUrl: String): String {
+    private fun buildTrojanJson(trojanUrl: String, forTest: Boolean): String {
         val withoutScheme = trojanUrl.removePrefix("trojan://")
         val atIndex = withoutScheme.indexOf("@")
         
@@ -322,7 +363,7 @@ object V2rayConfigGenerator {
         val spx = uri.getQueryParameter("spx") ?: ""
         val alpn = uri.getQueryParameter("alpn") ?: ""
 
-        val template = getBaseTemplate()
+        val template = getBaseTemplate(forTest)
 
         val proxyOutbound = JSONObject().apply {
             put("protocol", "trojan")
@@ -340,7 +381,7 @@ object V2rayConfigGenerator {
         return template.toString()
     }
 
-    private fun buildShadowsocksJson(ssUrl: String): String {
+    private fun buildShadowsocksJson(ssUrl: String, forTest: Boolean): String {
         var base64Part = ssUrl.removePrefix("ss://")
         val hashIndex = base64Part.indexOf("#")
         if (hashIndex != -1) {
@@ -407,7 +448,7 @@ object V2rayConfigGenerator {
             throw IllegalArgumentException("فرمت لینک Shadowsocks نامعتبر است.")
         }
 
-        val template = getBaseTemplate()
+        val template = getBaseTemplate(forTest)
 
         val proxyOutbound = JSONObject().apply {
             put("protocol", "shadowsocks")

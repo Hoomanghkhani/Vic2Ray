@@ -13,6 +13,7 @@ import kotlinx.coroutines.launch
 import libv2ray.Libv2ray
 import libv2ray.CoreController
 import kotlinx.coroutines.flow.MutableStateFlow
+import org.json.JSONObject
 
 class VicVpnService : VpnService() {
 
@@ -95,15 +96,25 @@ class VicVpnService : VpnService() {
                 
                 vpnInterface?.fd?.let { fd ->
                     android.system.Os.setenv("xray.tun.fd", fd.toString(), true)
-                    Log.d(TAG, "Set xray.tun.fd to $fd")
+                    android.system.Os.setenv("v2ray.tun.fd", fd.toString(), true)
+                    // Some variants use uppercase
+                    android.system.Os.setenv("XRAY_TUN_FD", fd.toString(), true)
+                    android.system.Os.setenv("V2RAY_TUN_FD", fd.toString(), true)
+                    // And some use dots but with different prefixes
+                    android.system.Os.setenv("vpn.tun.fd", fd.toString(), true)
+                    Log.d(TAG, "Set tun fd environment variables to $fd")
+                    
+                    // Try to find a way to set env via Libv2ray if reflection reveals a method
+                    logLibv2rayMethods()
+                    trySetEnvViaReflection("xray.tun.fd", fd.toString())
+                    trySetEnvViaReflection("v2ray.tun.fd", fd.toString())
                 }
 
                 Log.d(TAG, "Starting V2Ray core...")
                 try {
-                    // The second parameter for Xray's initCoreEnv is xudpBaseKey (Base64 encoded).
-                    // A 32-byte key encoded in Raw Base64 (no padding) is 43 characters long.
-                    val xudpBaseKey = "QUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUE"
-                    Libv2ray.initCoreEnv(applicationContext.filesDir.absolutePath, xudpBaseKey)
+                    // Centralized initialization of environment variables and core
+                    // Use force=true to ensure environment variables are refreshed in this process scope
+                    com.vic2ray.utils.AssetsUtils.initCore(applicationContext, force = true)
                 } catch (e: Exception) {
                     Log.e(TAG, "Error in initCoreEnv", e)
                 }
@@ -124,7 +135,36 @@ class VicVpnService : VpnService() {
                 }
                 
                 coreController = Libv2ray.newCoreController(callbackHandler)
-                coreController?.startLoop(jsonConfig, 0)
+                
+                // Inject the real TUN file descriptor into the JSON config robustly
+                val fd = vpnInterface?.fd ?: -1
+                val finalConfig = if (fd != -1) {
+                    try {
+                        val jsonObj = JSONObject(jsonConfig)
+                        val inbounds = jsonObj.getJSONArray("inbounds")
+                        for (i in 0 until inbounds.length()) {
+                            val inbound = inbounds.getJSONObject(i)
+                            if (inbound.optString("protocol") == "tun") {
+                                val settings = inbound.getJSONObject("settings")
+                                // Inject multiple possible keys for the FD
+                                settings.put("fd", fd)
+                                settings.put("androidTunFd", fd)
+                                settings.put("tunFd", fd)
+                                settings.put("tun-fd", fd)
+                                Log.d(TAG, "Injected FD $fd into TUN settings with multiple keys")
+                            }
+                        }
+                        jsonObj.toString()
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Error injecting FD into JSON", e)
+                        // Fallback simple replacement if JSON parsing fails
+                        jsonConfig.replace("\"fd\":-1", "\"fd\":$fd")
+                    }
+                } else {
+                    jsonConfig
+                }
+                
+                coreController?.startLoop(finalConfig, 0)
                 isConnected.value = true
                 Log.d(TAG, "V2Ray core started")
                 
@@ -148,6 +188,42 @@ class VicVpnService : VpnService() {
                 disconnect()
                 stopSelf()
             }
+        }
+    }
+
+    private fun logLibv2rayMethods() {
+        try {
+            val clazz = Libv2ray::class.java
+            Log.d(TAG, "--- Libv2ray Methods ---")
+            clazz.declaredMethods.forEach { method ->
+                Log.d(TAG, "Method: ${method.name}(${method.parameterTypes.joinToString { it.simpleName }})")
+            }
+            Log.d(TAG, "------------------------")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to log Libv2ray methods", e)
+        }
+    }
+
+    private fun trySetEnvViaReflection(key: String, value: String) {
+        try {
+            val clazz = Libv2ray::class.java
+            // Try to find a method named setEnv or similar
+            val methods = clazz.declaredMethods
+            val setEnvMethod = methods.find { 
+                (it.name == "setEnv" || it.name == "setenv") && 
+                it.parameterTypes.size == 2 && 
+                it.parameterTypes[0] == String::class.java && 
+                it.parameterTypes[1] == String::class.java 
+            }
+            
+            if (setEnvMethod != null) {
+                Log.d(TAG, "Found ${setEnvMethod.name} method, calling it for $key=$value")
+                setEnvMethod.invoke(null, key, value)
+            } else {
+                Log.d(TAG, "No setEnv method found in Libv2ray via reflection")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error calling setEnv via reflection", e)
         }
     }
 

@@ -24,7 +24,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val fetcher = ConfigFetcher()
     private val parser = ConfigParser()
-    private val tester = ConnectivityTester()
+    private val tester = ConnectivityTester(application)
 
     private var syncJob: Job? = null
 

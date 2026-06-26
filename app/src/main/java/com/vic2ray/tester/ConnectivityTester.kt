@@ -6,8 +6,13 @@ import kotlinx.coroutines.*
 import libv2ray.Libv2ray
 import java.util.concurrent.atomic.AtomicInteger
 
-class ConnectivityTester {
+class ConnectivityTester(private val context: android.content.Context) {
     private val nextPort = AtomicInteger(11000)
+
+    init {
+        // Ensure core is initialized when tester is created
+        com.vic2ray.utils.AssetsUtils.initCore(context)
+    }
 
     /**
      * تست پینگ واقعی سرور با اجرای موقت هسته Xray
@@ -19,8 +24,8 @@ class ConnectivityTester {
         var isSuccess = false
         
         try {
-            // تولید کانفیگ JSON برای تست با پورت اختصاصی
-            val fullConfigJson = V2rayConfigGenerator.generateJsonConfig(config.rawConfig, config.protocol)
+            // تولید کانفیگ JSON برای تست با پورت اختصاصی - بدون لایه TUN
+            val fullConfigJson = V2rayConfigGenerator.generateJsonConfig(config.rawConfig, config.protocol, forTest = true)
             // تغییر پورت پیش‌فرض ۱۰۸۰۸ به پورت تست اختصاصی برای جلوگیری از تداخل
             val testConfigJson = fullConfigJson.replace("10808", testPort.toString())
 

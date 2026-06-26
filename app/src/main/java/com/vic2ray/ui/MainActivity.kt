@@ -40,11 +40,16 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.vic2ray.models.VpnConfig
 import com.vic2ray.vpn.VicVpnService
 import com.vic2ray.vpn.V2rayConfigGenerator
+import com.vic2ray.utils.AssetsUtils
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        
+        // Copy required geo data files for Xray core
+        AssetsUtils.copyGeoAssets(this)
+
         setContent {
             VictoryTheme {
                 Vic2rayApp()
