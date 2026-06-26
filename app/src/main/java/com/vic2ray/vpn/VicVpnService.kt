@@ -72,10 +72,13 @@ class VicVpnService : VpnService() {
                 // A minimum configuration to establish the VPN interface
                 builder.addAddress("10.0.0.2", 24)
                 builder.addRoute("0.0.0.0", 0)
-                builder.addRoute("::", 0)
+                // DISABLE IPv6 routing by default to prevent leaks and force apps to fall back to IPv4
+                // Many apps (Telegram/WhatsApp) handle connection better when forced to IPv4 in VPN
+                // builder.addRoute("::", 0) 
+                
                 builder.addDnsServer("1.1.1.1")
                 builder.addDnsServer("8.8.8.8")
-                builder.setMtu(1400)
+                builder.setMtu(1280) // Lower MTU to 1280 for better compatibility with fragmented UDP (Telegram)
                 builder.setBlocking(false)
 
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {

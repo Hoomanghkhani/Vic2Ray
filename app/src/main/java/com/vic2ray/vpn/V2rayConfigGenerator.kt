@@ -54,13 +54,14 @@ object V2rayConfigGenerator {
                     put("enabled", true)
                     put("destOverride", JSONArray().put("http").put("tls").put("quic").put("fakedns"))
                     put("metadataOnly", false)
+                    put("routeOnly", true)
                 })
             }
             val tunInbound = JSONObject().apply {
                 put("protocol", "tun")
                 put("settings", JSONObject().apply {
                     put("name", "tun0")
-                    put("mtu", 1400)
+                    put("mtu", 1280)
                     put("address", JSONArray().put("10.0.0.1/24"))
                     put("autoRoute", false)
                     put("strictRoute", false)
@@ -74,6 +75,7 @@ object V2rayConfigGenerator {
                     put("enabled", true)
                     put("destOverride", JSONArray().put("http").put("tls").put("quic").put("fakedns"))
                     put("metadataOnly", false)
+                    put("routeOnly", true)
                 })
                 put("tag", "tun")
             }
