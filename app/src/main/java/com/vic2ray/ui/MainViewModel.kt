@@ -61,9 +61,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun initDefaultSources() {
         val defaultSources = listOf(
-            "https://raw.githubusercontent.com/ebrasha/free-v2ray-public-list/main/V2Ray-Config-By-EbraSha.txt",
-            "https://raw.githubusercontent.com/Epodonios/v2ray-configs/main/All_Configs_Sub.txt",
-            "https://raw.githubusercontent.com/barry-far/V2ray-Configs/main/All_Configs_Sub.txt"
+            "https://raw.githubusercontent.com/yebekhe/TelegramV2rayCollector/main/sub/normal/mix",
+            "https://raw.githubusercontent.com/mahdibland/ShadowsocksAggregator/master/Eternity",
+            "https://raw.githubusercontent.com/w1770946466/Auto_proxy/main/Long_term_subscription_num",
+            "https://raw.githubusercontent.com/soroushmirzaei/telegram-configs-collector/main/channels/protocols/vless",
+            "https://raw.githubusercontent.com/barry-far/V2ray-Configs/main/Sub1.txt"
         )
         _customSources.value = defaultSources
         saveSources(defaultSources)

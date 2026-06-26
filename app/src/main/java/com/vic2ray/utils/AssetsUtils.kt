@@ -12,29 +12,41 @@ object AssetsUtils {
     private const val XUDP_BASE_KEY = "QUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUE"
     private var isInitialized = false
 
-    fun copyGeoAssets(context: Context) {
+    fun copyGeoAssets(context: Context, force: Boolean = false) {
         val assets = listOf("geoip.dat", "geosite.dat")
         assets.forEach { fileName ->
             val targetFile = File(context.filesDir, fileName)
-            if (!targetFile.exists()) {
+            // If file doesn't exist, is empty, or is suspiciously small (< 1MB), or force is true, copy it.
+            // Note: Valid geodata files are typically several megabytes.
+            val shouldCopy = force || !targetFile.exists() || targetFile.length() < 1024 * 1024 
+            
+            if (shouldCopy) {
                 try {
                     Log.d(TAG, "Copying $fileName to ${targetFile.absolutePath}")
+                    val tempFile = File(context.filesDir, "$fileName.tmp")
                     context.assets.open(fileName).use { inputStream ->
-                        FileOutputStream(targetFile).use { outputStream ->
+                        Log.d(TAG, "Asset $fileName available size: ${inputStream.available()}")
+                        FileOutputStream(tempFile).use { outputStream ->
                             inputStream.copyTo(outputStream)
                         }
                     }
-                    Log.d(TAG, "Successfully copied $fileName")
+                    if (tempFile.exists() && tempFile.length() > 0) {
+                        if (targetFile.exists()) targetFile.delete()
+                        tempFile.renameTo(targetFile)
+                        Log.d(TAG, "Successfully copied $fileName. New size: ${targetFile.length()}")
+                    } else {
+                        Log.e(TAG, "Failed to copy $fileName: temp file is empty")
+                    }
                 } catch (e: Exception) {
                     Log.e(TAG, "Error copying $fileName: ${e.message}")
                 }
             } else {
-                Log.d(TAG, "$fileName already exists, skipping copy.")
+                Log.d(TAG, "$fileName already exists and seems valid (Size: ${targetFile.length()}), skipping copy.")
             }
         }
         
         // After copying (or if already present), initialize the environment
-        initCore(context)
+        initCore(context, force)
     }
 
     /**

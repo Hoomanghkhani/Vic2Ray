@@ -72,9 +72,13 @@ class VicVpnService : VpnService() {
                 // A minimum configuration to establish the VPN interface
                 builder.addAddress("10.0.0.2", 24)
                 builder.addRoute("0.0.0.0", 0)
-                // DISABLE IPv6 routing by default to prevent leaks and force apps to fall back to IPv4
-                // Many apps (Telegram/WhatsApp) handle connection better when forced to IPv4 in VPN
-                // builder.addRoute("::", 0) 
+                // Add IPv6 address and route to intercept IPv6 traffic (fixes Telegram/WhatsApp bypassing VPN)
+                try {
+                    builder.addAddress("fc00::2", 128)
+                    builder.addRoute("::", 0)
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error adding IPv6 to VPN: ${e.message}")
+                }
                 
                 builder.addDnsServer("1.1.1.1")
                 builder.addDnsServer("8.8.8.8")
@@ -167,9 +171,12 @@ class VicVpnService : VpnService() {
                     jsonConfig
                 }
                 
-                coreController?.startLoop(finalConfig, 0)
+                // CRITICAL: Pass the real TUN fd to libv2ray - this is what enables tun2socks bridging inside the library.
+                // Passing 0 (as before) meant libv2ray never read traffic from the VPN tunnel.
+                val tunFd = vpnInterface?.fd ?: 0
+                coreController?.startLoop(finalConfig, tunFd)
                 isConnected.value = true
-                Log.d(TAG, "V2Ray core started")
+                Log.d(TAG, "V2Ray core started with TUN fd=$tunFd")
                 
                 // Initial ping test
                 serviceScope.launch {

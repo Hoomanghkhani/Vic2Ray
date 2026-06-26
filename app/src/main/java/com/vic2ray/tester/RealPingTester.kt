@@ -17,12 +17,12 @@ object RealPingTester {
         val startTime = System.currentTimeMillis()
         try {
             val proxy = Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", port))
-            // استفاده از HTTPS برای جلوگیری از محدودیت‌های Cleartext در اندروید
-            val url = URL("https://cp.cloudflare.com/generate_204")
+            // Use Google connectivity check as it's usually more stable in various regions
+            val url = URL("http://connectivitycheck.gstatic.com/generate_204")
             
             val connection = url.openConnection(proxy) as HttpURLConnection
-            connection.connectTimeout = 4000 // 4 seconds
-            connection.readTimeout = 4000
+            connection.connectTimeout = 6000 // 6 seconds for better stability in Iran
+            connection.readTimeout = 6000
             connection.useCaches = false
             
             val responseCode = connection.responseCode
@@ -32,7 +32,10 @@ object RealPingTester {
             } else {
                 return@withContext -1
             }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
         } catch (e: Exception) {
+            android.util.Log.e("RealPingTester", "Ping failed on port $port: ${e.message}", e)
             return@withContext -1
         }
     }

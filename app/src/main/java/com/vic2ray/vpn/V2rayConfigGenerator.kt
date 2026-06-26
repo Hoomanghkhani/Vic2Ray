@@ -21,47 +21,69 @@ object V2rayConfigGenerator {
 
     private fun getBaseTemplate(forTest: Boolean): JSONObject {
         val template = JSONObject()
-        
+
+        // Match v2rayNG loglevel
         template.put("log", JSONObject().apply {
-            put("loglevel", "debug")
+            put("loglevel", if (forTest) "debug" else "warning")
+        })
+
+        // Policy: connection timeouts critical for messaging apps (long-lived TCP connections)
+        template.put("policy", JSONObject().apply {
+            put("levels", JSONObject().apply {
+                put("8", JSONObject().apply {
+                    put("handshake", 4)
+                    put("connIdle", 300)
+                    put("uplinkOnly", 1)
+                    put("downlinkOnly", 1)
+                })
+            })
+            put("system", JSONObject().apply {
+                put("statsOutboundUplink", false)
+                put("statsOutboundDownlink", false)
+            })
         })
 
         val inbounds = JSONArray()
         val socksInbound = JSONObject().apply {
-            put("port", 10808)
+            put("tag", "socks")
+            put("port", if (forTest) 10808 else 10808)
             put("listen", "127.0.0.1")
             put("protocol", "socks")
             put("settings", JSONObject().apply {
                 put("auth", "noauth")
                 put("udp", true)
+                put("userLevel", 8)
             })
+            // Simple sniffing without fakedns - matches v2rayNG default
             put("sniffing", JSONObject().apply {
                 put("enabled", true)
-                put("destOverride", JSONArray().put("http").put("tls").put("quic").put("fakedns"))
-                put("metadataOnly", false)
+                put("destOverride", JSONArray().put("http").put("tls").put("quic"))
+                put("routeOnly", false)
             })
         }
         inbounds.put(socksInbound)
 
-        // Only add HTTP and TUN inbounds if it's NOT for testing
         if (!forTest) {
             val httpInbound = JSONObject().apply {
+                put("tag", "http")
                 put("port", 10809)
                 put("listen", "127.0.0.1")
                 put("protocol", "http")
-                put("settings", JSONObject())
+                put("settings", JSONObject().apply {
+                    put("userLevel", 8)
+                })
                 put("sniffing", JSONObject().apply {
                     put("enabled", true)
-                    put("destOverride", JSONArray().put("http").put("tls").put("quic").put("fakedns"))
-                    put("metadataOnly", false)
-                    put("routeOnly", true)
+                    put("destOverride", JSONArray().put("http").put("tls").put("quic"))
+                    put("routeOnly", false)
                 })
             }
             val tunInbound = JSONObject().apply {
+                put("tag", "tun")
                 put("protocol", "tun")
                 put("settings", JSONObject().apply {
                     put("name", "tun0")
-                    put("mtu", 1280)
+                    put("mtu", 1500)
                     put("address", JSONArray().put("10.0.0.1/24"))
                     put("autoRoute", false)
                     put("strictRoute", false)
@@ -70,66 +92,51 @@ object V2rayConfigGenerator {
                     put("androidTunFd", -1)
                     put("tunFd", -1)
                     put("tun-fd", -1)
+                    put("userLevel", 8)
                 })
                 put("sniffing", JSONObject().apply {
                     put("enabled", true)
-                    put("destOverride", JSONArray().put("http").put("tls").put("quic").put("fakedns"))
-                    put("metadataOnly", false)
-                    put("routeOnly", true)
+                    put("destOverride", JSONArray().put("http").put("tls").put("quic"))
+                    put("routeOnly", false)
                 })
-                put("tag", "tun")
             }
             inbounds.put(httpInbound)
             inbounds.put(tunInbound)
         }
-        
+
         template.put("inbounds", inbounds)
 
-        // FakeDNS configuration
-        val fakeDnsArray = JSONArray()
-        fakeDnsArray.put(JSONObject().apply {
-            put("ipPool", "198.18.0.0/15")
-            put("poolSize", 65535)
-        })
-        template.put("fakedns", fakeDnsArray)
-
-        // DNS Configuration with FakeDNS
+        // Simple, proven DNS config - NO FakeDNS (causes messaging app failures)
         template.put("dns", JSONObject().apply {
-            val servers = JSONArray()
-            servers.put("fakedns")
-            servers.put(JSONObject().apply {
-                put("address", "1.1.1.1")
-                put("port", 53)
-                put("domains", JSONArray().put("geosite:google"))
+            put("hosts", JSONObject().apply {
+                // Force Google domains to known IPs to avoid DNS issues
+                put("dns.google", "8.8.8.8")
             })
+            val servers = JSONArray()
+            // Primary: Google DNS via proxy
             servers.put("8.8.8.8")
-            servers.put("https://dns.google/dns-query")
+            // Secondary: Cloudflare
+            servers.put("1.1.1.1")
+            // Fallback
+            servers.put("8.8.4.4")
             put("servers", servers)
-            // PREFER IPv4 to avoid IPv6 connection refused issues
+            // Force IPv4 to avoid IPv6 issues with free proxies
             put("queryStrategy", "UseIPv4")
         })
 
-        // Explicit routing
+        // Clean routing - matches v2rayNG proven pattern
         template.put("routing", JSONObject().apply {
             put("domainStrategy", "IPIfNonMatch")
             val rules = JSONArray()
-            
-            // DNS rule
+
+            // 1. Route DNS (port 53) through proxy outbound (critical for messaging apps)
             rules.put(JSONObject().apply {
                 put("type", "field")
-                put("inboundTag", JSONArray().put("tun").put("socks").put("http"))
                 put("port", "53")
                 put("outboundTag", "dns-out")
             })
 
-            // FakeDNS rule
-            rules.put(JSONObject().apply {
-                put("type", "field")
-                put("protocol", JSONArray().put("bittorrent"))
-                put("outboundTag", "direct")
-            })
-
-            // Local traffic rule
+            // 2. Private/Local IPs go direct
             rules.put(JSONObject().apply {
                 put("type", "field")
                 put("ip", JSONArray().apply {
@@ -137,13 +144,34 @@ object V2rayConfigGenerator {
                     put("10.0.0.0/8")
                     put("172.16.0.0/12")
                     put("192.168.0.0/16")
-                    put("::1/128")
                     put("fc00::/7")
                     put("fe80::/10")
                 })
                 put("outboundTag", "direct")
             })
-            
+
+            // 3. .ir domains go direct
+            rules.put(JSONObject().apply {
+                put("type", "field")
+                put("domain", JSONArray().apply {
+                    put("domain:ir")
+                    put("keyword:cafebazaar")
+                    put("keyword:snapp")
+                    put("keyword:tapsi")
+                    put("keyword:digikala")
+                })
+                put("outboundTag", "direct")
+            })
+
+            // 4. Block QUIC (UDP/443) - forces apps to use TCP through proxy
+            // This fixes Instagram/Twitter chat which tries QUIC first
+            rules.put(JSONObject().apply {
+                put("type", "field")
+                put("network", "udp")
+                put("port", "443")
+                put("outboundTag", "block")
+            })
+
             put("rules", rules)
         })
 
@@ -152,6 +180,12 @@ object V2rayConfigGenerator {
 
     private fun addOutbounds(template: JSONObject, proxyOutbound: JSONObject) {
         val outbounds = JSONArray()
+        
+        // Ensure proxy outbound has a tag
+        if (!proxyOutbound.has("tag")) {
+            proxyOutbound.put("tag", "proxy")
+        }
+        
         outbounds.put(proxyOutbound)
         outbounds.put(JSONObject().apply {
             put("protocol", "dns")
@@ -160,6 +194,13 @@ object V2rayConfigGenerator {
         outbounds.put(JSONObject().apply {
             put("protocol", "freedom")
             put("tag", "direct")
+            put("settings", JSONObject().apply {
+                put("domainStrategy", "UseIPv4")
+            })
+        })
+        outbounds.put(JSONObject().apply {
+            put("protocol", "blackhole")
+            put("tag", "block")
         })
         template.put("outbounds", outbounds)
     }

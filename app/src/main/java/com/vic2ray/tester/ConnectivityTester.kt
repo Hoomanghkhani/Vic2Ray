@@ -23,6 +23,7 @@ class ConnectivityTester(private val context: android.content.Context) {
         var pingResult = -1
         var isSuccess = false
         
+        var core: libv2ray.CoreController? = null
         try {
             // تولید کانفیگ JSON برای تست با پورت اختصاصی - بدون لایه TUN
             val fullConfigJson = V2rayConfigGenerator.generateJsonConfig(config.rawConfig, config.protocol, forTest = true)
@@ -30,14 +31,19 @@ class ConnectivityTester(private val context: android.content.Context) {
             val testConfigJson = fullConfigJson.replace("10808", testPort.toString())
 
             val callback = object : libv2ray.CoreCallbackHandler {
-                override fun onEmitStatus(status: Long, message: String?): Long = 0
+                override fun onEmitStatus(status: Long, message: String?): Long {
+                    android.util.Log.d("ConnectivityTester", "Core Status [${testPort}]: $status, $message")
+                    return 0
+                }
                 override fun shutdown(): Long = 0
                 override fun startup(): Long = 0
             }
             
-            val core = Libv2ray.newCoreController(callback)
+            android.util.Log.d("ConnectivityTester", "Starting core on port $testPort for ${config.name}")
+            core = Libv2ray.newCoreController(callback)
             // استارت هسته روی پورت تست
             core.startLoop(testConfigJson, 0)
+            android.util.Log.d("ConnectivityTester", "Core started on port $testPort for ${config.name}")
             
             // صبر کوتاه برای بالا آمدن سرویس پروکسی
             delay(500)
@@ -45,11 +51,19 @@ class ConnectivityTester(private val context: android.content.Context) {
             // انجام تست HTTP واقعی از طریق پورت تست
             pingResult = RealPingTester.testProxyPing(testPort)
             isSuccess = pingResult > 0
-            
-            // توقف هسته پس از اتمام تست
-            core.stopLoop()
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             android.util.Log.e("ConnectivityTester", "Error testing ${config.name}: ${e.message}")
+        } finally {
+            // توقف هسته پس از اتمام تست یا در صورت خطا
+            try {
+                android.util.Log.d("ConnectivityTester", "Stopping core on port $testPort...")
+                core?.stopLoop()
+                android.util.Log.d("ConnectivityTester", "Core stopped on port $testPort.")
+            } catch (e: Exception) {
+                android.util.Log.e("ConnectivityTester", "Error stopping core on port $testPort", e)
+            }
         }
 
         config.copy(
@@ -65,8 +79,8 @@ class ConnectivityTester(private val context: android.content.Context) {
         configs: List<VpnConfig>,
         onResult: (VpnConfig) -> Unit
     ) = withContext(Dispatchers.IO) {
-        // برای جلوگیری از مصرف بیش از حد رم و CPU، تست‌ها در دسته‌های ۸ تایی اجرا می‌شوند
-        configs.chunked(8).forEach { chunk ->
+        // برای تست سریع‌تر، تست‌ها در دسته‌های ۶ تایی اجرا می‌شوند
+        configs.chunked(6).forEach { chunk ->
             val deferreds = chunk.map { config ->
                 async {
                     val result = testConfigReal(config)
