@@ -34,9 +34,15 @@ jobs:
         with:
           java-version: '21'
           distribution: 'temurin'
-      - name: Install Android SDK packages
-        run: |
-          sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
+      - name: Set up Android SDK and packages
+        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+        env:
+          ANDROID_SDK_ROOT: ${{ runner.temp }}/android-sdk
+        with:
+          cmdline-tools-version: '12266719'
+          accept-android-sdk-licenses: 'true'
+          log-accepted-android-sdk-licenses: 'false'
+          packages: 'platform-tools platforms;android-35 build-tools;35.0.0'
       - name: Set up Gradle and validate wrapper
         uses: gradle/actions/setup-gradle@48b5f213c81028ace310571dc5ec0fbbca0b2947 # v4
         with:
@@ -90,9 +96,16 @@ jobs:
         with:
           java-version: '21'
           distribution: 'temurin'
-      - name: Install Android SDK packages
+      - name: Set up Android SDK and packages
         if: steps.plan.outputs.publish == 'true'
-        run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
+        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+        env:
+          ANDROID_SDK_ROOT: ${{ runner.temp }}/android-sdk
+        with:
+          cmdline-tools-version: '12266719'
+          accept-android-sdk-licenses: 'true'
+          log-accepted-android-sdk-licenses: 'false'
+          packages: 'platform-tools platforms;android-35 build-tools;35.0.0'
       - name: Set up Gradle and validate wrapper
         if: steps.plan.outputs.publish == 'true'
         uses: gradle/actions/setup-gradle@48b5f213c81028ace310571dc5ec0fbbca0b2947 # v4
