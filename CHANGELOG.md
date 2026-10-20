@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.2.0 — 2026-10-20
+
+- Selected six compact GitHub subscriptions using live downloads, file-level update dates and the app's actual parser; replaced the stale Auto_proxy feed and updated the aggregator's canonical repository path.
+- Added default-enabled discovery on foreground startup and hourly refresh, with a 60-candidate automatic scan, ten-minute retry/stop cooldown and an off switch in subscription settings. Active VPN sessions and backgrounding pause automatic discovery; connection requests cancel scanning.
+- Added friendly source names and received-configuration counts. Sources with no supported links now report an unavailable/invalid result rather than a silent success.
+- Interleaved unique links from each source before the bounded scan so large or duplicate-heavy feeds cannot crowd out smaller sources. Manual discovery still scans up to 300 candidates and subsequent scans rotate through the queue.
+- Retained scan progress after partial cancellation and paused automatic discovery while importing personal configurations, so brief visits and manual imports remain useful.
+- Migrated untouched old default subscriptions while retaining customized or deliberately empty lists and all saved/imported servers and favorites.
+- Fixed black text on the dark dashboard by supplying the root content color. Reworked the palette around navy/slate, cyan and mint, with explicit text, field, menu, chip, dialog, snackbar and disabled-control colors.
+- Added a CI contrast check over 45 opaque color pairs to reject unreadable text/control combinations.
+- Added regression coverage for scheduling, cooldowns, source migrations, fair scanning, URL/document mapping and fetch cancellation. Version 1.2.0 / Android code 23 keeps the stable release signing key introduced in 1.1.0.
+
 ## 1.1.0 — 2026-10-20
 
 - Rebuilt the native dashboard with animated connection controls, progress feedback, Persian/English language switching and RTL support.

@@ -9,16 +9,21 @@ import androidx.lifecycle.viewModelScope
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import com.vic2ray.fetcher.ConfigFetcher
+import com.vic2ray.models.AutoRefreshPolicy
 import com.vic2ray.models.ProtocolType
 import com.vic2ray.models.ServerCatalog
 import com.vic2ray.models.ServerSort
+import com.vic2ray.models.SubscriptionSources
 import com.vic2ray.models.VpnConfig
 import com.vic2ray.parser.ConfigParser
 import com.vic2ray.tester.ConnectivityTester
+import com.vic2ray.vpn.VicVpnService
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.asStateFlow
@@ -36,6 +41,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val parser = ConfigParser()
     private val tester by lazy { ConnectivityTester(application) }
     @Volatile private var syncJob: Job? = null
+    private var autoRefreshJob: Job? = null
+    private var automaticSync = false
+    private var syncGeneration = 0L
+    private var appStarted = false
+    private var importVisible = false
+    private var lastAutoAttempt = prefs.getLong("last_auto_attempt", 0L)
     private var persistJob: Job? = null
     private var importedLinks = prefs.getStringSet("imported_links", emptySet()).orEmpty().toSet()
 
@@ -56,6 +67,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val favorites = _favorites.asStateFlow()
     private val _customSources = MutableStateFlow(loadSources())
     val customSources = _customSources.asStateFlow()
+    private val _autoRefresh = MutableStateFlow(prefs.getBoolean("auto_refresh", true))
+    val autoRefresh = _autoRefresh.asStateFlow()
+    private val _sourceCounts = MutableStateFlow<Map<String, Int>>(emptyMap())
+    val sourceCounts = _sourceCounts.asStateFlow()
     private val _sourceFailures = MutableStateFlow<List<String>>(emptyList())
     val sourceFailures = _sourceFailures.asStateFlow()
     private val _lastSyncTime = MutableStateFlow(prefs.getLong("last_sync_time", 0L))
@@ -77,16 +92,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }.stateIn(viewModelScope, SharingStarted.Eagerly, _allConfigs.value)
 
     private fun loadSources(): List<String> {
-        val json = prefs.getString("sources_list", null) ?: return DEFAULT_SOURCES
+        val json = prefs.getString("sources_list", null)
         return runCatching {
             val type = object : TypeToken<List<String>>() {}.type
-            val saved = gson.fromJson<List<String>>(json, type).orEmpty()
-                .map(String::trim).filter(ServerCatalog::isValidSource).distinct()
-            if (saved == LEGACY_DEFAULT_SOURCES) {
-                prefs.edit().putString("sources_list", gson.toJson(DEFAULT_SOURCES)).apply()
-                DEFAULT_SOURCES
-            } else saved
-        }.getOrDefault(DEFAULT_SOURCES)
+            val saved = if (json == null) null else gson.fromJson<List<String>>(json, type)
+            SubscriptionSources.migrate(saved).also { migrated ->
+                if (migrated != saved) prefs.edit()
+                    .putString("sources_list", gson.toJson(migrated))
+                    .putLong("last_sync_time", 0L).apply()
+            }
+        }.getOrDefault(SubscriptionSources.urls)
     }
 
     private fun loadCachedConfigs(): List<VpnConfig> = runCatching {
@@ -121,12 +136,63 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun removeSource(url: String) = saveSources(_customSources.value - url)
-    fun restoreDefaultSources() = saveSources(DEFAULT_SOURCES)
+    fun restoreDefaultSources() = saveSources(SubscriptionSources.urls)
 
     private fun saveSources(sources: List<String>) {
         _customSources.value = sources
         _sourceFailures.value = _sourceFailures.value.filter { it in sources }
+        _sourceCounts.value = _sourceCounts.value.filterKeys { it in sources }
         prefs.edit().putString("sources_list", gson.toJson(sources)).apply()
+    }
+
+    /** The activity owns this foreground-only loop; it never starts background services. */
+    fun onAppStarted() {
+        appStarted = true
+        if (autoRefreshJob?.isActive == true) return
+        autoRefreshJob = viewModelScope.launch {
+            while (isActive) {
+                maybeAutoRefresh()
+                delay(30_000)
+            }
+        }
+    }
+
+    fun onAppStopped() {
+        appStarted = false
+        autoRefreshJob?.cancel()
+        autoRefreshJob = null
+        if (automaticSync) stopSync()
+    }
+
+    fun setAutoRefresh(enabled: Boolean) {
+        _autoRefresh.value = enabled
+        prefs.edit().putBoolean("auto_refresh", enabled).apply()
+        if (!enabled && automaticSync) stopSync()
+        if (enabled) maybeAutoRefresh()
+    }
+
+    fun setImportVisible(visible: Boolean) {
+        importVisible = visible
+        if (visible && automaticSync) stopSync()
+    }
+
+    private fun maybeAutoRefresh() {
+        if (!appStarted) return
+        val vpnActive = VicVpnService.isConnected.value || VicVpnService.isConnecting.value
+        if (vpnActive && automaticSync) stopSync()
+        if (AutoRefreshPolicy.shouldRefresh(
+                now = System.currentTimeMillis(), lastSync = _lastSyncTime.value,
+                lastAttempt = lastAutoAttempt, enabled = _autoRefresh.value,
+                busy = syncJob?.isActive == true, vpnActive = vpnActive,
+                hasSources = _customSources.value.isNotEmpty(),
+                hasWorkingServers = _allConfigs.value.any { it.isWorking && it.ping > 0 },
+                interactionActive = importVisible
+            )) startSync(automatic = true)
+    }
+
+    /** Give tunnel startup priority over discovery, including the native test cores. */
+    fun pauseDiscoveryForConnection() {
+        if (syncJob?.isActive == true) stopSync()
     }
 
     fun setSearchQuery(query: String) { _searchQuery.value = query }
@@ -161,34 +227,53 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         return added.size
     }
 
+    fun syncAndTestServers() = startSync(automatic = false)
+
     @Synchronized
-    fun syncAndTestServers() {
+    private fun startSync(automatic: Boolean) {
         if (syncJob?.isActive == true) return
         val manager = getApplication<Application>().getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
         val capabilities = manager.getNetworkCapabilities(manager.activeNetwork)
         if (capabilities?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) != true) {
-            _uiState.value = UiState.Error(message("No internet connection. Cached servers are still available.",
+            if (!automatic) _uiState.value = UiState.Error(message(
+                "No internet connection. Cached servers are still available.",
                 "اتصال اینترنت برقرار نیست. سرورهای ذخیره‌شده همچنان در دسترس‌اند."))
             return
         }
         val sources = _customSources.value.toList()
-        val imports = _allConfigs.value.filter { it.rawConfig in importedLinks }
-        if (sources.isEmpty() && imports.isEmpty()) {
+        val pinned = _allConfigs.value.filter { it.rawConfig in importedLinks || it.rawConfig in _favorites.value }
+        if (sources.isEmpty() && pinned.isEmpty()) {
             _uiState.value = UiState.Error(message("Add a source or import a configuration first.",
                 "ابتدا یک منبع یا کانفیگ اضافه کن."))
             return
         }
 
+        automaticSync = automatic
+        lastAutoAttempt = System.currentTimeMillis()
+        prefs.edit().putLong("last_auto_attempt", lastAutoAttempt).apply()
+        val scanLimit = if (automatic) MAX_AUTO_SCAN_CONFIGS else MAX_SCAN_CONFIGS
+        val generation = ++syncGeneration
         syncJob = viewModelScope.launch {
             _sourceFailures.value = emptyList()
+            _sourceCounts.value = emptyMap()
             _uiState.value = UiState.Loading(message("Updating subscription sources…", "در حال دریافت منابع…"))
             try {
                 val fetched = fetcher.fetchSources(sources)
-                _sourceFailures.value = fetched.failedSources
-                val parsed = withContext(Dispatchers.Default) { parser.parseConfigs(fetched.rawLines) }
-                val candidates = ServerCatalog.scanCandidates(ServerCatalog.merge(imports, parsed),
+                val groups = withContext(Dispatchers.Default) {
+                    fetched.documents.map { document ->
+                        document.url to parser.parseConfigs(listOf(document.body))
+                    }
+                }
+                _sourceCounts.value = groups.associate { it.first to it.second.size }
+                _sourceFailures.value = (fetched.failedSources +
+                    groups.filter { it.second.isEmpty() }.map { it.first }).distinct()
+                val parsed = withContext(Dispatchers.Default) {
+                    ServerCatalog.interleaveSources(groups.map { it.second })
+                }
+                val initialCursor = prefs.getInt("scan_cursor", 0)
+                val candidates = ServerCatalog.scanCandidates(ServerCatalog.merge(pinned, parsed),
                     priorityLinks = _favorites.value + importedLinks,
-                    offset = prefs.getInt("scan_cursor", 0), limit = MAX_SCAN_CONFIGS)
+                    offset = initialCursor, limit = scanLimit)
                 if (candidates.isEmpty()) {
                     _uiState.value = UiState.Error(message("No valid configurations received. Cached servers were kept.",
                         "کانفیگ معتبری دریافت نشد. سرورهای قبلی حفظ شدند."))
@@ -201,6 +286,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val found = mutableListOf<VpnConfig>()
                 tester.testAllStreaming(candidates) { result ->
                     tested++
+                    // Save completed progress even if backgrounding cancels the rest of this page.
+                    prefs.edit().putInt("scan_cursor", (initialCursor.toLong() + tested)
+                        .rem(Int.MAX_VALUE).toInt()).apply()
                     if (result.isWorking) {
                         working++
                         found.add(result)
@@ -212,9 +300,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     if (tested % 25 == 0) persistCatalog()
                 }
                 _lastSyncTime.value = System.currentTimeMillis()
-                val previousCursor = prefs.getInt("scan_cursor", 0)
-                prefs.edit().putInt("scan_cursor", (previousCursor.toLong() + MAX_SCAN_CONFIGS)
-                    .rem(Int.MAX_VALUE).toInt()).apply()
                 persistCatalog()
                 _uiState.value = if (working > 0) UiState.Success(_allConfigs.value) else
                     UiState.Error(message("No server passed the connection test. Try another sync or import a trusted link.",
@@ -225,6 +310,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 _uiState.value = UiState.Error(message("Update failed. Your saved servers are still available.",
                     "به‌روزرسانی ناموفق بود. سرورهای ذخیره‌شده همچنان در دسترس‌اند."))
             } finally {
+                if (generation == syncGeneration) automaticSync = false
                 persistCatalog()
             }
         }
@@ -239,7 +325,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun stopSync() {
+        lastAutoAttempt = System.currentTimeMillis()
+        prefs.edit().putLong("last_auto_attempt", lastAutoAttempt).apply()
         syncJob?.cancel()
+        automaticSync = false
         _uiState.value = if (_allConfigs.value.isEmpty()) UiState.Idle else UiState.Success(_allConfigs.value)
         persistCatalog()
     }
@@ -248,21 +337,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     companion object {
         const val MAX_SCAN_CONFIGS = 300
+        private const val MAX_AUTO_SCAN_CONFIGS = 60
         private const val MAX_CACHED_CONFIGS = 2000
         private const val MAX_IMPORTED_CONFIGS = 1000
         private const val MAX_IMPORT_CHARS = 1024 * 1024
-        private val LEGACY_DEFAULT_SOURCES = listOf(
-            "https://raw.githubusercontent.com/yebekhe/TelegramV2rayCollector/main/sub/normal/mix",
-            "https://raw.githubusercontent.com/mahdibland/ShadowsocksAggregator/master/Eternity",
-            "https://raw.githubusercontent.com/w1770946466/Auto_proxy/main/Long_term_subscription_num",
-            "https://raw.githubusercontent.com/soroushmirzaei/telegram-configs-collector/main/channels/protocols/vless",
-            "https://raw.githubusercontent.com/barry-far/V2ray-Configs/main/Sub1.txt"
-        )
-        private val DEFAULT_SOURCES = listOf(
-            "https://raw.githubusercontent.com/mahdibland/ShadowsocksAggregator/master/Eternity",
-            "https://raw.githubusercontent.com/w1770946466/Auto_proxy/main/Long_term_subscription_num",
-            "https://raw.githubusercontent.com/barry-far/V2ray-config/main/Sub1.txt"
-        )
     }
 }
 

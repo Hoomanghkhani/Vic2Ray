@@ -94,4 +94,61 @@ class ServerCatalogTest {
         assertEquals(configs.take(300), first)
         assertEquals(configs.size, (first + second).toSet().size)
     }
+
+    @Test fun `first bounded scan gives each subscription a turn despite a large first source`() {
+        val firstSource = (1..900).map { config("First $it") }
+        val secondSource = (1..600).map { config("Second $it") }
+        val thirdSource = (1..600).map { config("Third $it") }
+
+        val ordered = ServerCatalog.interleaveSources(listOf(firstSource, secondSource, thirdSource))
+        val firstPage = ServerCatalog.scanCandidates(ordered)
+
+        assertEquals(300, firstPage.size)
+        assertEquals(listOf("First 1", "Second 1", "Third 1", "First 2", "Second 2", "Third 2"),
+            firstPage.take(6).map { it.name })
+        assertEquals(100, firstPage.count { it.name.startsWith("First ") })
+        assertEquals(100, firstPage.count { it.name.startsWith("Second ") })
+        assertEquals(100, firstPage.count { it.name.startsWith("Third ") })
+    }
+
+    @Test fun `duplicate prefix cannot hide a later source unique links from the first scan`() {
+        val shared = (1..400).map { config("Shared $it") }
+        val laterUnique = (1..100).map { config("Later $it") }
+
+        val ordered = ServerCatalog.interleaveSources(listOf(shared, shared + laterUnique))
+        val firstPage = ServerCatalog.scanCandidates(ordered)
+
+        assertEquals(listOf("Shared 1", "Later 1", "Shared 2", "Later 2", "Shared 3", "Later 3"),
+            firstPage.take(6).map { it.name })
+        assertEquals(100, firstPage.count { it.name.startsWith("Later ") })
+        assertEquals(500, ordered.size)
+        assertEquals(ordered.size, ordered.distinctBy { it.rawConfig }.size)
+    }
+
+    @Test fun `interleaving skips empty and exhausted groups and keeps first duplicate ownership`() {
+        val first = config("First", 20)
+        val second = config("Second", 30)
+        val third = config("Third", 40)
+        val ordered = ServerCatalog.interleaveSources(listOf(emptyList(),
+            listOf(first, first.copy(ping = 900), second), emptyList(),
+            listOf(first.copy(ping = 800), third), emptyList()))
+
+        assertEquals(listOf(first, third, second), ordered)
+        assertTrue(ServerCatalog.interleaveSources(emptyList()).isEmpty())
+        assertTrue(ServerCatalog.interleaveSources(listOf(emptyList(), emptyList())).isEmpty())
+    }
+
+    @Test fun `successive bounded scans cover the full interleaved subscription queue`() {
+        val firstSource = (1..400).map { config("First $it") }
+        val secondSource = (1..300).map { config("Second $it") }
+        val ordered = ServerCatalog.interleaveSources(listOf(firstSource, secondSource))
+        val pages = listOf(0, 300, 600).flatMap { offset ->
+            ServerCatalog.scanCandidates(ordered, offset = offset)
+        }
+
+        assertEquals(700, ordered.size)
+        assertEquals((firstSource + secondSource).toSet(), pages.toSet())
+        assertEquals(600, pages.take(600).distinctBy { it.rawConfig }.size)
+        assertEquals(ordered.take(200), pages.drop(700))
+    }
 }

@@ -71,7 +71,10 @@
     <string name="restore_sources_hint">This replaces the current subscription list. Your saved and imported servers stay available.</string>
     <string name="restore">Restore</string>
     <string name="no_sources">No subscription sources. Add one or restore the defaults.</string>
-    <string name="source_unreachable">Unreachable during last refresh</string>
+    <string name="source_unreachable">Unavailable or no supported links during last refresh</string>
+    <string name="source_received">%1$d supported configurations received</string>
+    <string name="auto_refresh_title">Automatic server discovery</string>
+    <string name="auto_refresh_hint">Refresh hourly while this app is open and test up to 60 candidates. Paused during a VPN connection.</string>
     <string name="import_hint">Paste VMess, VLESS, Trojan or Shadowsocks links, or open a text subscription file. Imported servers stay saved after refresh.</string>
     <string name="config_links">Configuration links</string>
     <string name="paste_clipboard">Paste</string>
@@ -95,5 +98,5 @@
     <string name="creator">Created by Hooman Ghardashkhani</string>
     <string name="active">ACTIVE</string>
     <string name="server_connect">Connect to %1$s</string>
-    <string name="scan_limit">Each refresh tests up to 300 candidates. Refresh again to explore more.</string>
+    <string name="scan_limit">Automatic discovery tests up to 60 candidates; manual refresh tests up to 300. Sources take turns so each gets a chance.</string>
 </resources>

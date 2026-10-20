@@ -18,12 +18,12 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Snackbar
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -33,14 +33,16 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.vic2ray.R
 import com.vic2ray.models.VpnConfig
@@ -63,34 +65,6 @@ class MainActivity : ComponentActivity() {
         }
         setContent { VictoryTheme { Vic2rayApp() } }
     }
-}
-
-internal val Navy = Color(0xFF080F1D)
-internal val Panel = Color(0xFF121D30)
-internal val PanelLight = Color(0xFF1A2840)
-internal val Gold = Color(0xFFF3CA78)
-internal val Mint = Color(0xFF80DFBC)
-internal val Muted = Color(0xFF9AAAC1)
-
-@Composable
-fun VictoryTheme(content: @Composable () -> Unit) {
-    MaterialTheme(
-        colorScheme = darkColorScheme(
-            primary = Gold,
-            onPrimary = Color(0xFF28200F),
-            secondary = Mint,
-            onSecondary = Color(0xFF082A20),
-            background = Navy,
-            onBackground = Color(0xFFF1F5FC),
-            surface = Panel,
-            onSurface = Color(0xFFF1F5FC),
-            surfaceVariant = PanelLight,
-            onSurfaceVariant = Muted,
-            outline = Color(0xFF3B4B63),
-            error = Color(0xFFFFA6A3)
-        ),
-        content = content
-    )
 }
 
 /** Localize only this activity's presentation; persist the choice in the catalog. */
@@ -120,6 +94,33 @@ private fun AppLanguage(language: String, content: @Composable () -> Unit) {
 
 @Composable
 fun Vic2rayApp(mainViewModel: MainViewModel = viewModel()) {
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(mainViewModel, lifecycleOwner) {
+        val lifecycle = lifecycleOwner.lifecycle
+        var started = false
+        fun startDiscovery() {
+            if (!started) {
+                started = true
+                mainViewModel.onAppStarted()
+            }
+        }
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_START -> startDiscovery()
+                Lifecycle.Event.ON_STOP -> {
+                    started = false
+                    mainViewModel.onAppStopped()
+                }
+                else -> Unit
+            }
+        }
+        lifecycle.addObserver(observer)
+        if (lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) startDiscovery()
+        onDispose {
+            lifecycle.removeObserver(observer)
+            mainViewModel.onAppStopped()
+        }
+    }
     val language by mainViewModel.language.collectAsState()
     AppLanguage(language) { DashboardHost(mainViewModel) }
 }
@@ -137,6 +138,11 @@ private fun DashboardHost(viewModel: MainViewModel) {
     var localError by rememberSaveable { mutableStateOf<String?>(null) }
     // An ID survives recreation without putting large credentials in Android's saved-state Bundle.
     var pendingConfigId by rememberSaveable { mutableStateOf<String?>(null) }
+
+    DisposableEffect(viewModel, showImport) {
+        viewModel.setImportVisible(showImport)
+        onDispose { if (showImport) viewModel.setImportVisible(false) }
+    }
 
     fun startPendingVpn() {
         val config = viewModel.allConfigs.value.firstOrNull { it.id == pendingConfigId }
@@ -177,6 +183,7 @@ private fun DashboardHost(viewModel: MainViewModel) {
 
     fun connect(config: VpnConfig) {
         try {
+            viewModel.pauseDiscoveryForConnection()
             pendingConfigId = config.id
             localError = null
             val intent = VpnService.prepare(context)
@@ -274,7 +281,15 @@ private fun DashboardHost(viewModel: MainViewModel) {
                 }
             }
         )
-        SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(12.dp))
+        SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(12.dp)) { data ->
+            Snackbar(
+                snackbarData = data,
+                containerColor = PanelLight,
+                contentColor = MainText,
+                actionColor = Accent,
+                dismissActionContentColor = Muted
+            )
+        }
     }
     if (showImport) ImportServersDialog(
         busy = importing,

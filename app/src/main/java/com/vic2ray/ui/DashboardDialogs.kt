@@ -7,6 +7,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -18,10 +19,10 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
@@ -31,6 +32,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.vic2ray.BuildConfig
 import com.vic2ray.R
+import com.vic2ray.models.SubscriptionSources
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -50,6 +52,8 @@ internal fun ImportServersDialog(
         onDismissRequest = onDismiss,
         shape = RoundedCornerShape(26.dp),
         containerColor = Panel,
+        titleContentColor = MainText,
+        textContentColor = Muted,
         title = { Text(stringResource(R.string.import_title), fontWeight = FontWeight.Bold) },
         text = {
             Column(
@@ -68,11 +72,13 @@ internal fun ImportServersDialog(
                     textStyle = MaterialTheme.typography.bodySmall.copy(textDirection = TextDirection.Ltr),
                     enabled = !busy,
                     shape = RoundedCornerShape(14.dp),
+                    colors = victoryTextFieldColors(),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri)
                 )
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedButton(
                         enabled = !busy,
+                        colors = victoryOutlinedButtonColors(),
                         onClick = {
                             val text = clipboard.getText()?.text.orEmpty()
                             when {
@@ -86,6 +92,7 @@ internal fun ImportServersDialog(
                     ) { Text(stringResource(R.string.paste_clipboard)) }
                     OutlinedButton(
                         enabled = !busy,
+                        colors = victoryOutlinedButtonColors(),
                         onClick = onOpenFile,
                         modifier = Modifier.weight(1.4f),
                         shape = RoundedCornerShape(12.dp)
@@ -96,15 +103,15 @@ internal fun ImportServersDialog(
                     Spacer(Modifier.width(8.dp))
                     Text(stringResource(R.string.import_reading), color = Muted, style = MaterialTheme.typography.labelSmall)
                 }
-                if (message != null) Text(message, color = Gold, style = MaterialTheme.typography.bodySmall)
+                if (message != null) Text(message, color = Accent, style = MaterialTheme.typography.bodySmall)
             }
         },
         confirmButton = {
-            Button(onClick = { onImport(input) }, enabled = !busy && input.isNotBlank(), shape = RoundedCornerShape(12.dp)) {
+            Button(onClick = { onImport(input) }, enabled = !busy && input.isNotBlank(), colors = victoryButtonColors(), shape = RoundedCornerShape(12.dp)) {
                 Text(stringResource(R.string.import_action))
             }
         },
-        dismissButton = { TextButton(onClick = onDismiss, enabled = !busy) { Text(stringResource(R.string.cancel)) } }
+        dismissButton = { TextButton(onClick = onDismiss, enabled = !busy, colors = victoryTextButtonColors()) { Text(stringResource(R.string.cancel)) } }
     )
 }
 
@@ -113,6 +120,8 @@ internal fun ImportServersDialog(
 fun SourcesManagementDialog(mainViewModel: MainViewModel, onDismiss: () -> Unit) {
     val sources by mainViewModel.customSources.collectAsState()
     val failures by mainViewModel.sourceFailures.collectAsState()
+    val sourceCounts by mainViewModel.sourceCounts.collectAsState()
+    val automatic by mainViewModel.autoRefresh.collectAsState()
     var url by rememberSaveable { mutableStateOf("") }
     var invalid by rememberSaveable { mutableStateOf(false) }
     var restore by rememberSaveable { mutableStateOf(false) }
@@ -120,6 +129,8 @@ fun SourcesManagementDialog(mainViewModel: MainViewModel, onDismiss: () -> Unit)
         onDismissRequest = onDismiss,
         shape = RoundedCornerShape(26.dp),
         containerColor = Panel,
+        titleContentColor = MainText,
+        textContentColor = Muted,
         title = { Text(stringResource(R.string.sources), fontWeight = FontWeight.Bold) },
         text = {
             Column(
@@ -127,19 +138,59 @@ fun SourcesManagementDialog(mainViewModel: MainViewModel, onDismiss: () -> Unit)
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 Text(stringResource(R.string.sources_hint), color = Muted, style = MaterialTheme.typography.bodySmall)
-                Text(stringResource(R.string.scan_limit), color = Gold.copy(alpha = 0.85f), style = MaterialTheme.typography.labelSmall)
+                Surface(shape = RoundedCornerShape(14.dp), color = PanelLight, contentColor = MainText) {
+                    Row(
+                        Modifier.fillMaxWidth().toggleable(
+                            value = automatic,
+                            role = Role.Switch,
+                            onValueChange = mainViewModel::setAutoRefresh
+                        ).padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                            Text(stringResource(R.string.auto_refresh_title), color = MainText, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.labelLarge)
+                            Text(stringResource(R.string.auto_refresh_hint), color = Muted, style = MaterialTheme.typography.bodySmall)
+                        }
+                        Switch(
+                            checked = automatic,
+                            onCheckedChange = null,
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = OnAccent,
+                                checkedTrackColor = Accent,
+                                checkedBorderColor = Accent,
+                                uncheckedThumbColor = Muted,
+                                uncheckedTrackColor = Panel,
+                                uncheckedBorderColor = Outline
+                            )
+                        )
+                    }
+                }
+                Text(stringResource(R.string.scan_limit), color = Accent, style = MaterialTheme.typography.labelSmall)
                 if (sources.isEmpty()) Text(stringResource(R.string.no_sources), color = Muted, style = MaterialTheme.typography.bodySmall)
                 sources.forEach { source ->
-                    Surface(shape = RoundedCornerShape(12.dp), color = PanelLight) {
+                    Surface(shape = RoundedCornerShape(12.dp), color = PanelLight, contentColor = MainText) {
                         Row(Modifier.fillMaxWidth().padding(start = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f).padding(vertical = 10.dp)) {
+                                SubscriptionSources.displayName(source)?.let { name ->
+                                    Text(
+                                        name,
+                                        color = MainText,
+                                        fontWeight = FontWeight.SemiBold,
+                                        style = MaterialTheme.typography.labelMedium.copy(textDirection = TextDirection.Ltr),
+                                        modifier = Modifier.padding(bottom = 4.dp)
+                                    )
+                                }
                                 Text(
                                     source,
                                     maxLines = 2,
                                     overflow = TextOverflow.Ellipsis,
                                     style = MaterialTheme.typography.labelSmall.copy(textDirection = TextDirection.Ltr),
-                                    color = Color.White
+                                    color = Muted
                                 )
+                                sourceCounts[source]?.takeIf { it > 0 }?.let { count ->
+                                    Text(stringResource(R.string.source_received, count), color = Mint, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(top = 5.dp))
+                                }
                                 if (source in failures) Text(stringResource(R.string.source_unreachable), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(top = 5.dp))
                             }
                             IconButton(onClick = { mainViewModel.removeSource(source) }) {
@@ -155,6 +206,7 @@ fun SourcesManagementDialog(mainViewModel: MainViewModel, onDismiss: () -> Unit)
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(12.dp),
+                    colors = victoryTextFieldColors(),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
                     textStyle = MaterialTheme.typography.bodySmall.copy(textDirection = TextDirection.Ltr),
                     isError = invalid,
@@ -165,6 +217,7 @@ fun SourcesManagementDialog(mainViewModel: MainViewModel, onDismiss: () -> Unit)
                         if (mainViewModel.addCustomSource(url.trim())) { url = ""; invalid = false } else invalid = true
                     },
                     enabled = url.isNotBlank(),
+                    colors = victoryOutlinedButtonColors(),
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(12.dp)
                 ) {
@@ -172,20 +225,22 @@ fun SourcesManagementDialog(mainViewModel: MainViewModel, onDismiss: () -> Unit)
                     Spacer(Modifier.width(7.dp))
                     Text(stringResource(R.string.add_source))
                 }
-                TextButton(onClick = { restore = true }, modifier = Modifier.fillMaxWidth()) {
+                TextButton(onClick = { restore = true }, colors = victoryTextButtonColors(), modifier = Modifier.fillMaxWidth()) {
                     Text(stringResource(R.string.restore_sources), textAlign = TextAlign.Center)
                 }
             }
         },
-        confirmButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.close)) } }
+        confirmButton = { TextButton(onClick = onDismiss, colors = victoryTextButtonColors()) { Text(stringResource(R.string.close)) } }
     )
     if (restore) AlertDialog(
         onDismissRequest = { restore = false },
         containerColor = Panel,
+        titleContentColor = MainText,
+        textContentColor = Muted,
         title = { Text(stringResource(R.string.restore_sources_title)) },
         text = { Text(stringResource(R.string.restore_sources_hint), color = Muted) },
-        confirmButton = { TextButton(onClick = { mainViewModel.restoreDefaultSources(); restore = false }) { Text(stringResource(R.string.restore)) } },
-        dismissButton = { TextButton(onClick = { restore = false }) { Text(stringResource(R.string.cancel)) } }
+        confirmButton = { TextButton(onClick = { mainViewModel.restoreDefaultSources(); restore = false }, colors = victoryTextButtonColors()) { Text(stringResource(R.string.restore)) } },
+        dismissButton = { TextButton(onClick = { restore = false }, colors = victoryTextButtonColors()) { Text(stringResource(R.string.cancel)) } }
     )
 }
 
@@ -196,14 +251,16 @@ fun AboutDialog(onDismiss: () -> Unit) {
         onDismissRequest = onDismiss,
         shape = RoundedCornerShape(26.dp),
         containerColor = Panel,
+        titleContentColor = MainText,
+        textContentColor = Muted,
         title = {
             Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
-                Box(Modifier.size(58.dp).background(Gold, RoundedCornerShape(18.dp)), contentAlignment = Alignment.Center) {
-                    Text("V", fontWeight = FontWeight.Black, fontSize = 36.sp, color = Navy)
+                Box(Modifier.size(58.dp).background(Accent, RoundedCornerShape(18.dp)), contentAlignment = Alignment.Center) {
+                    Text("V", fontWeight = FontWeight.Black, fontSize = 36.sp, color = OnAccent)
                 }
                 Spacer(Modifier.height(14.dp))
                 Text("Vic2Ray", fontWeight = FontWeight.ExtraBold, style = MaterialTheme.typography.headlineSmall)
-                Text(stringResource(R.string.version, BuildConfig.VERSION_NAME), color = Gold, style = MaterialTheme.typography.labelMedium)
+                Text(stringResource(R.string.version, BuildConfig.VERSION_NAME), color = Accent, style = MaterialTheme.typography.labelMedium)
             }
         },
         text = {
@@ -221,6 +278,7 @@ fun AboutDialog(onDismiss: () -> Unit) {
                         runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/Hoomanghkhani/Vic2Ray"))) }
                     },
                     shape = RoundedCornerShape(12.dp),
+                    colors = victoryOutlinedButtonColors(),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Icon(Icons.Default.Share, null, Modifier.size(17.dp))
@@ -230,6 +288,6 @@ fun AboutDialog(onDismiss: () -> Unit) {
                 Text(stringResource(R.string.creator), color = Muted, style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.Center)
             }
         },
-        confirmButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.close)) } }
+        confirmButton = { TextButton(onClick = onDismiss, colors = victoryTextButtonColors()) { Text(stringResource(R.string.close)) } }
     )
 }

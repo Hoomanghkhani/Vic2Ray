@@ -2,10 +2,16 @@
 <resources>
     <style name="Theme.Vic2ray" parent="android:Theme.Material.NoActionBar">
         <item name="android:fontFamily">sans</item>
-        <item name="android:windowBackground">#080F1D</item>
-        <item name="android:colorAccent">#F3CA78</item>
-        <item name="android:statusBarColor">#080F1D</item>
-        <item name="android:navigationBarColor">#080F1D</item>
+        <item name="android:windowBackground">#0B1220</item>
+        <item name="android:colorBackground">#0B1220</item>
+        <item name="android:colorAccent">#67DCF1</item>
+        <item name="android:colorControlNormal">#B7C6DB</item>
+        <item name="android:textColorPrimary">#F3F7FC</item>
+        <item name="android:textColorSecondary">#B7C6DB</item>
+        <item name="android:textColorHint">#B7C6DB</item>
+        <item name="android:textColorHighlight">#4D67DCF1</item>
+        <item name="android:statusBarColor">#0B1220</item>
+        <item name="android:navigationBarColor">#0B1220</item>
         <item name="android:windowLightStatusBar">false</item>
         <item name="android:windowActionModeOverlay">true</item>
     </style>

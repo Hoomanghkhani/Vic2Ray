@@ -41,6 +41,23 @@ object ServerCatalog {
         false
     }
 
+    /** Each source owns its first-seen links so duplicate prefixes cannot consume another source's turn. */
+    fun interleaveSources(configsBySource: List<List<VpnConfig>>): List<VpnConfig> {
+        val seen = HashSet<String>()
+        val sources = java.util.ArrayDeque<Iterator<VpnConfig>>()
+        configsBySource.forEach { configs ->
+            val unique = configs.filter { seen.add(it.rawConfig) }
+            if (unique.isNotEmpty()) sources.addLast(unique.iterator())
+        }
+        val result = ArrayList<VpnConfig>(seen.size)
+        while (sources.isNotEmpty()) {
+            val source = sources.removeFirst()
+            result.add(source.next())
+            if (source.hasNext()) sources.addLast(source)
+        }
+        return result
+    }
+
     fun scanCandidates(configs: List<VpnConfig>, priorityLinks: Set<String> = emptySet(),
         offset: Int = 0, limit: Int = 300): List<VpnConfig> {
         if (limit <= 0 || configs.isEmpty()) return emptyList()

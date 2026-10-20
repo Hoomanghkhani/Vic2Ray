@@ -1,5 +1,7 @@
 package com.vic2ray.fetcher
 
+import com.vic2ray.BuildConfig
+import com.vic2ray.models.ServerCatalog
 import kotlinx.coroutines.*
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
@@ -9,9 +11,14 @@ import java.net.HttpURLConnection
 import java.net.URI
 import java.net.URL
 
-data class FetchResult(val rawLines: List<String>, val failedSources: List<String>)
+data class SourceDocument(val url: String, val body: String)
 
-class ConfigFetcher {
+data class FetchResult(val rawLines: List<String>, val failedSources: List<String>,
+    val documents: List<SourceDocument> = emptyList())
+
+class ConfigFetcher internal constructor(private val openConnection: (URL) -> HttpURLConnection) {
+    constructor() : this({ it.openConnection() as HttpURLConnection })
+
     /** Each entry keeps a whole source document, including wrapped Base64 subscriptions. */
     suspend fun fetchSources(sources: List<String>): FetchResult = coroutineScope {
         val permits = Semaphore(3)
@@ -28,9 +35,11 @@ class ConfigFetcher {
                 }
             }
         }.awaitAll()
+        val documents = results.mapNotNull { (url, body) -> body?.let { SourceDocument(url, it) } }
         FetchResult(
-            rawLines = results.mapNotNull { it.second }.distinct(),
-            failedSources = results.filter { it.second == null }.map { it.first }
+            rawLines = documents.map { it.body }.distinct(),
+            failedSources = results.filter { it.second == null }.map { it.first },
+            documents = documents
         )
     }
 
@@ -39,17 +48,17 @@ class ConfigFetcher {
     private suspend fun fetchSource(source: String): String {
         var address = source
         repeat(4) { redirectCount ->
-            val uri = URI(address)
-            require(uri.scheme.equals("https", true) && !uri.host.isNullOrBlank() && uri.rawUserInfo == null) {
+            require(ServerCatalog.isValidSource(address)) {
                 "Subscriptions must use a valid HTTPS URL."
             }
-            val connection = URL(address).openConnection() as HttpURLConnection
+            val uri = URI(address)
+            val connection = openConnection(URL(address))
             connection.connectTimeout = 8_000
             connection.readTimeout = 8_000
             connection.instanceFollowRedirects = false
             connection.useCaches = false
             connection.setRequestProperty("Accept", "text/plain, */*;q=0.5")
-            connection.setRequestProperty("User-Agent", "Vic2Ray/1.1")
+            connection.setRequestProperty("User-Agent", "Vic2Ray/${BuildConfig.VERSION_NAME}")
             val response = cancellableRequest(connection) {
                 val status = it.responseCode
                 if (status in listOf(301, 302, 303, 307, 308)) {

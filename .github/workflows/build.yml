@@ -27,6 +27,7 @@ jobs:
       - name: Check shared version and release rules
         run: |
           python3 -m unittest discover -s scripts/tests -v
+          python3 scripts/check_theme_contrast.py
           python3 scripts/release.py metadata
           bash -n scripts/package_apk.sh
       - name: Set up JDK 21

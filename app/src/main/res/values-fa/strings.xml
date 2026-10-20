@@ -71,7 +71,10 @@
     <string name="restore_sources_hint">فهرست منابع فعلی جایگزین می‌شود. سرورهای ذخیره‌شده و واردشده باقی می‌مانند.</string>
     <string name="restore">بازگردانی</string>
     <string name="no_sources">منبعی وجود ندارد. یک منبع اضافه کنید یا پیش‌فرض‌ها را بازگردانید.</string>
-    <string name="source_unreachable">در آخرین به‌روزرسانی در دسترس نبود</string>
+    <string name="source_unreachable">در آخرین به‌روزرسانی در دسترس نبود یا لینک سازگاری نداشت</string>
+    <string name="source_received">%1$d کانفیگ سازگار دریافت شد</string>
+    <string name="auto_refresh_title">دریافت خودکار سرورها</string>
+    <string name="auto_refresh_hint">هنگام باز بودن برنامه، هر ساعت منابع و تا ۶۰ سرور بررسی می‌شوند. هنگام اتصال VPN متوقف می‌شود.</string>
     <string name="import_hint">لینک‌های VMess، VLESS، Trojan یا Shadowsocks را بچسبانید یا فایل متنی اشتراک را باز کنید. سرورهای واردشده پس از به‌روزرسانی هم ذخیره می‌مانند.</string>
     <string name="config_links">لینک‌های تنظیمات</string>
     <string name="paste_clipboard">چسباندن</string>
@@ -95,5 +98,5 @@
     <string name="creator">ساختهٔ هومن قارداش‌خانی</string>
     <string name="active">فعال</string>
     <string name="server_connect">اتصال به %1$s</string>
-    <string name="scan_limit">هر به‌روزرسانی تا ۳۰۰ سرور را آزمایش می‌کند. برای بررسی سرورهای بیشتر دوباره به‌روزرسانی کنید.</string>
+    <string name="scan_limit">دریافت خودکار تا ۶۰ و به‌روزرسانی دستی تا ۳۰۰ سرور را آزمایش می‌کند. منابع به‌نوبت بررسی می‌شوند.</string>
 </resources>
