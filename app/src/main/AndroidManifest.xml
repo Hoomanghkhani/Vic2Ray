@@ -1,11 +1,15 @@
 <?xml version='1.0' encoding='utf-8'?>
-<manifest xmlns:android='http://schemas.android.com/apk/res/android'>
+<manifest xmlns:android='http://schemas.android.com/apk/res/android'
+          xmlns:tools='http://schemas.android.com/tools'>
     <uses-permission android:name='android.permission.INTERNET' />
     <uses-permission android:name='android.permission.ACCESS_NETWORK_STATE' />
     <uses-permission android:name='android.permission.FOREGROUND_SERVICE' />
+    <uses-permission android:name='android.permission.FOREGROUND_SERVICE_SYSTEM_EXEMPTED' />
     <uses-permission android:name='android.permission.POST_NOTIFICATIONS' />
     <application 
-        android:allowBackup='true' 
+        android:allowBackup='false'
+        android:fullBackupContent='@xml/backup_rules'
+        android:dataExtractionRules='@xml/data_extraction_rules'
         android:icon='@mipmap/ic_launcher'
         android:roundIcon='@mipmap/ic_launcher'
         android:label='@string/app_name' 
@@ -19,8 +23,12 @@
             </intent-filter>
         </activity>
         
+        <!-- Consented VPNs qualify via OP_ACTIVATE_VPN. Lint only models the alarm alternatives.
+             https://developer.android.com/develop/background-work/services/fgs/service-types#system-exempted -->
         <service android:name='.vpn.VicVpnService'
                  android:permission='android.permission.BIND_VPN_SERVICE'
+                 android:foregroundServiceType='systemExempted'
+                 tools:ignore='ForegroundServicePermission'
                  android:exported='false'>
             <intent-filter>
                 <action android:name='android.net.VpnService'/>

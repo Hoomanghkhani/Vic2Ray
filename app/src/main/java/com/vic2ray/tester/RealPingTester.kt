@@ -1,45 +1,53 @@
 package com.vic2ray.tester
 
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.*
 import java.net.HttpURLConnection
 import java.net.InetSocketAddress
 import java.net.Proxy
 import java.net.URL
+import java.util.concurrent.TimeUnit
 
 object RealPingTester {
-    /**
-     * تست پینگ واقعی از طریق پروکسی محلی SOCKS
-     * این متد تلاش می‌کند یک درخواست HTTP به کلودفلر ارسال کند.
-     * اگر موفقیت‌آمیز باشد، یعنی پروکسی واقعاً کار می‌کند.
-     */
-    suspend fun testProxyPing(port: Int = 10808): Int = withContext(Dispatchers.IO) {
-        val startTime = System.currentTimeMillis()
-        try {
+    suspend fun testProxyPing(port: Int = 10808): Int {
+        require(port in 1..65535)
+        return try {
             val proxy = Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", port))
-            // Use Google connectivity check as it's usually more stable in various regions
-            val url = URL("http://connectivitycheck.gstatic.com/generate_204")
-            
-            val connection = url.openConnection(proxy) as HttpURLConnection
-            connection.connectTimeout = 6000 // 6 seconds for better stability in Iran
-            connection.readTimeout = 6000
-            connection.useCaches = false
-            
-            val responseCode = connection.responseCode
-            if (responseCode >= 200 && responseCode < 400) {
-                val endTime = System.currentTimeMillis()
-                return@withContext (endTime - startTime).toInt()
-            } else {
-                return@withContext -1
-            }
-        } catch (e: kotlinx.coroutines.CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            android.util.Log.e("RealPingTester", "Ping failed on port $port: ${e.message}", e)
-            return@withContext -1
+            val connection = URL("https://www.gstatic.com/generate_204").openConnection(proxy) as HttpURLConnection
+            withTimeoutOrNull(10_000) { measureConnection(connection) } ?: -1
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            -1
         }
     }
-    
-    // Legacy support for VicVpnService
+
+    internal suspend fun measureConnection(connection: HttpURLConnection): Int = coroutineScope {
+        connection.connectTimeout = 6_000
+        connection.readTimeout = 6_000
+        connection.instanceFollowRedirects = false
+        connection.useCaches = false
+        val request = async(Dispatchers.IO) {
+            val start = System.nanoTime()
+            try {
+                val responseCode = connection.responseCode
+                ensureActive()
+                if (responseCode == HttpURLConnection.HTTP_NO_CONTENT) {
+                    TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start)
+                        .coerceIn(1, Int.MAX_VALUE.toLong()).toInt()
+                } else -1
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                -1
+            } finally {
+                connection.disconnect()
+            }
+        }
+        try { request.await() } finally {
+            request.cancel()
+            connection.disconnect()
+        }
+    }
+
     suspend fun testCurrentConnectionPing(): Int = testProxyPing(10808)
 }

@@ -1,30 +1,63 @@
 package com.vic2ray.vpn
 
-import android.net.Uri
-import android.util.Base64
 import com.vic2ray.models.ProtocolType
+import com.vic2ray.parser.ProxyLink
+import com.vic2ray.parser.ProxyLinkParser
+import java.util.Locale
 import org.json.JSONArray
 import org.json.JSONObject
-import java.net.URLDecoder
 
 object V2rayConfigGenerator {
     
-    fun generateJsonConfig(rawConfig: String, protocol: ProtocolType, forTest: Boolean = false): String {
-        return when (protocol) {
-            ProtocolType.VMESS -> buildVmessJson(rawConfig, forTest)
-            ProtocolType.VLESS -> buildVlessJson(rawConfig, forTest)
-            ProtocolType.TROJAN -> buildTrojanJson(rawConfig, forTest)
-            ProtocolType.SS -> buildShadowsocksJson(rawConfig, forTest)
-            else -> throw IllegalArgumentException("پروتکل ${protocol.name} در حال حاضر پشتیبانی نمی‌شود.")
+    fun generateJsonConfig(
+        rawConfig: String,
+        protocol: ProtocolType,
+        forTest: Boolean = false,
+        socksPort: Int = 10808
+    ): String {
+        require(socksPort in 1..65535) { "The local SOCKS port is invalid." }
+        val link = ProxyLinkParser.parse(rawConfig)
+        require(link.protocol == protocol) { "The proxy protocol does not match the link." }
+        val template = getBaseTemplate(forTest, socksPort)
+        val server = JSONObject().put("address", link.address).put("port", link.port)
+        val settings = JSONObject()
+        when (protocol) {
+            ProtocolType.VMESS, ProtocolType.VLESS -> {
+                val user = JSONObject().put("id", link.credential)
+                if (protocol == ProtocolType.VMESS) {
+                    user.put("alterId", link.parameters["aid"]?.toIntOrNull() ?: 0)
+                    user.put("security", link.parameters["scy"]?.ifBlank { "auto" } ?: "auto")
+                } else {
+                    user.put("encryption", link.parameters["encryption"]?.ifBlank { "none" } ?: "none")
+                    link.parameters["flow"]?.takeIf { it.isNotBlank() }?.let { user.put("flow", it) }
+                }
+                server.put("users", JSONArray().put(user))
+                settings.put("vnext", JSONArray().put(server))
+            }
+            ProtocolType.TROJAN -> {
+                server.put("password", link.credential)
+                settings.put("servers", JSONArray().put(server))
+            }
+            ProtocolType.SS -> {
+                server.put("method", link.cipher).put("password", link.credential)
+                settings.put("servers", JSONArray().put(server))
+            }
+            else -> error("Unsupported proxy protocol.")
         }
+        val outbound = JSONObject()
+            .put("protocol", if (protocol == ProtocolType.SS) "shadowsocks" else protocol.name.lowercase(Locale.ROOT))
+            .put("settings", settings)
+        if (protocol != ProtocolType.SS) outbound.put("streamSettings", buildStreamSettings(link))
+        addOutbounds(template, outbound)
+        return template.toString()
     }
 
-    private fun getBaseTemplate(forTest: Boolean): JSONObject {
+    private fun getBaseTemplate(forTest: Boolean, socksPort: Int): JSONObject {
         val template = JSONObject()
 
         // Match v2rayNG loglevel
         template.put("log", JSONObject().apply {
-            put("loglevel", if (forTest) "debug" else "warning")
+            put("loglevel", "warning")
         })
 
         // Policy: connection timeouts critical for messaging apps (long-lived TCP connections)
@@ -46,7 +79,7 @@ object V2rayConfigGenerator {
         val inbounds = JSONArray()
         val socksInbound = JSONObject().apply {
             put("tag", "socks")
-            put("port", if (forTest) 10808 else 10808)
+            put("port", socksPort)
             put("listen", "127.0.0.1")
             put("protocol", "socks")
             put("settings", JSONObject().apply {
@@ -83,7 +116,7 @@ object V2rayConfigGenerator {
                 put("protocol", "tun")
                 put("settings", JSONObject().apply {
                     put("name", "tun0")
-                    put("mtu", 1500)
+                    put("mtu", 1280)
                     put("address", JSONArray().put("10.0.0.1/24"))
                     put("autoRoute", false)
                     put("strictRoute", false)
@@ -205,307 +238,68 @@ object V2rayConfigGenerator {
         template.put("outbounds", outbounds)
     }
 
-    private fun buildStreamSettings(
-        net: String, tls: String, sni: String, host: String, path: String, flow: String = "",
-        pbk: String = "", fp: String = "", sid: String = "", spx: String = "", alpn: String = ""
-    ): JSONObject {
-        val streamSettings = JSONObject()
-        val actualNet = if (net.isEmpty()) "tcp" else net
-        streamSettings.put("network", actualNet)
-        
-        if (tls == "tls" || tls == "xtls" || tls == "reality") {
-            streamSettings.put("security", tls)
-            val tlsSettings = JSONObject().apply {
-                if (sni.isNotEmpty()) put("serverName", sni)
-                else if (host.isNotEmpty()) put("serverName", host)
-                put("allowInsecure", true)
-                
-                if (alpn.isNotEmpty()) {
-                    val alpnArray = JSONArray()
-                    alpn.split(",").forEach { alpnArray.put(it.trim()) }
-                    put("alpn", alpnArray)
-                }
-
-                if (tls == "reality") {
-                    if (pbk.isNotEmpty()) put("publicKey", pbk)
-                    if (fp.isNotEmpty()) put("fingerprint", fp)
-                    if (sid.isNotEmpty()) put("shortId", sid)
-                    if (spx.isNotEmpty()) put("spiderX", spx)
-                } else {
-                    if (fp.isNotEmpty()) put("fingerprint", fp)
-                }
+    private fun buildStreamSettings(link: ProxyLink): JSONObject {
+        val parameters = link.parameters
+        val network = (parameters[if (link.protocol == ProtocolType.VMESS) "net" else "type"] ?: "tcp")
+            .ifBlank { "tcp" }.lowercase(Locale.ROOT).let { if (it == "raw") "tcp" else it }
+        val security = (parameters[if (link.protocol == ProtocolType.VMESS) "tls" else "security"]
+            ?: if (link.protocol == ProtocolType.TROJAN) "tls" else "none").lowercase(Locale.ROOT)
+        val host = parameters["host"].orEmpty()
+        val path = parameters["path"].orEmpty()
+        val stream = JSONObject().put("network", network)
+        if (security == "tls" || security == "reality") {
+            stream.put("security", security)
+            val tls = JSONObject()
+            val serverName = parameters["sni"]?.ifBlank { null } ?: host
+            if (serverName.isNotBlank()) tls.put("serverName", serverName)
+            val fingerprint = parameters["fp"]?.ifBlank { null } ?: if (security == "reality") "chrome" else null
+            fingerprint?.let { tls.put("fingerprint", it) }
+            parameters["alpn"]?.takeIf { it.isNotBlank() }?.let { value ->
+                tls.put("alpn", JSONArray(value.split(',').map { it.trim() }.filter { it.isNotEmpty() }))
             }
-            if (tls == "tls") streamSettings.put("tlsSettings", tlsSettings)
-            if (tls == "xtls") streamSettings.put("xtlsSettings", tlsSettings)
-            if (tls == "reality") streamSettings.put("realitySettings", tlsSettings)
+            if (security == "reality") {
+                val publicKey = parameters["pbk"]?.ifBlank { null } ?: parameters["publicKey"]
+                require(!publicKey.isNullOrBlank()) { "The REALITY public key is missing." }
+                tls.put("publicKey", publicKey)
+                parameters["sid"]?.let { tls.put("shortId", it) }
+                parameters["spx"]?.let { tls.put("spiderX", it) }
+            } else {
+                val insecure = parameters["allowInsecure"] ?: parameters["insecure"] ?: "false"
+                tls.put("allowInsecure", insecure.equals("true", true) || insecure == "1")
+            }
+            stream.put(if (security == "reality") "realitySettings" else "tlsSettings", tls)
         }
-
-        if (actualNet == "ws") {
-            streamSettings.put("wsSettings", JSONObject().apply {
-                put("path", if (path.isEmpty()) "/" else path)
-                if (host.isNotEmpty()) {
-                    put("headers", JSONObject().apply {
-                        put("Host", host)
+        when (network) {
+            "ws" -> stream.put("wsSettings", JSONObject().apply {
+                put("path", path.ifBlank { "/" })
+                if (host.isNotBlank()) put("headers", JSONObject().put("Host", host))
+            })
+            "grpc" -> stream.put("grpcSettings", JSONObject().apply {
+                put("serviceName", parameters["serviceName"] ?: path)
+                put("multiMode", parameters["mode"] == "multi" || parameters["multiMode"] == "true")
+                parameters["authority"]?.let { put("authority", it) }
+            })
+            "httpupgrade" -> stream.put("httpupgradeSettings", JSONObject().apply {
+                put("path", path.ifBlank { "/" })
+                if (host.isNotBlank()) put("host", host)
+            })
+            "xhttp", "splithttp" -> stream.put("xhttpSettings", JSONObject().apply {
+                put("path", path.ifBlank { "/" })
+                if (host.isNotBlank()) put("host", host)
+                put("mode", parameters["mode"]?.ifBlank { "auto" } ?: "auto")
+            })
+            "tcp" -> {
+                val headerType = parameters["headerType"] ?: if (link.protocol == ProtocolType.VMESS) parameters["type"] else null
+                require(headerType.isNullOrBlank() || headerType == "none" || headerType == "http") { "This TCP header type is not supported." }
+                if (headerType == "http") stream.put("tcpSettings", JSONObject().put("header", JSONObject().apply {
+                    put("type", "http")
+                    put("request", JSONObject().apply {
+                        put("path", JSONArray().put(path.ifBlank { "/" }))
+                        if (host.isNotBlank()) put("headers", JSONObject().put("Host", JSONArray(host.split(','))))
                     })
-                }
-            })
-        } else if (actualNet == "grpc") {
-            streamSettings.put("grpcSettings", JSONObject().apply {
-                put("serviceName", path)
-                put("multiMode", false)
-            })
-        }
-        return streamSettings
-    }
-
-    private fun buildVmessJson(vmessUrl: String, forTest: Boolean): String {
-        var base64Part = vmessUrl.removePrefix("vmess://")
-        
-        // Remove everything after # if exists (remarks in URI)
-        val hashIndex = base64Part.indexOf("#")
-        if (hashIndex != -1) {
-            base64Part = base64Part.substring(0, hashIndex)
-        }
-
-        val jsonString = try {
-            String(Base64.decode(base64Part, Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING), Charsets.UTF_8)
-        } catch (e: Exception) {
-            // Fallback to default decode if URL_SAFE fails
-            String(Base64.decode(base64Part, Base64.DEFAULT), Charsets.UTF_8)
-        }
-        
-        val vmessParams = try {
-            JSONObject(jsonString)
-        } catch (e: Exception) {
-            // If it's still not a valid JSON, try to fix common truncation issues in remarks
-            if (jsonString.contains("\"ps\":\"")) {
-                val fixedJson = jsonString.substringBefore(",\"ps\":") + "}"
-                JSONObject(fixedJson)
-            } else {
-                throw e
+                }))
             }
         }
-
-        val add = vmessParams.optString("add")
-        val port = vmessParams.optString("port").toIntOrNull() ?: 443
-        val id = vmessParams.optString("id")
-        val aid = vmessParams.optString("aid", "0").toIntOrNull() ?: 0
-        val net = vmessParams.optString("net", "tcp")
-        val host = vmessParams.optString("host", "")
-        val path = vmessParams.optString("path", "")
-        val tls = vmessParams.optString("tls", "")
-        val sni = vmessParams.optString("sni", host)
-
-        val alpn = vmessParams.optString("alpn", "")
-        val fp = vmessParams.optString("fp", "")
-        val pbk = vmessParams.optString("pbk", "")
-        val sid = vmessParams.optString("sid", "")
-        val spx = vmessParams.optString("spx", "")
-
-        val template = getBaseTemplate(forTest)
-        
-        val proxyOutbound = JSONObject().apply {
-            put("protocol", "vmess")
-            put("settings", JSONObject().apply {
-                put("vnext", JSONArray().put(JSONObject().apply {
-                    put("address", add)
-                    put("port", port)
-                    put("users", JSONArray().put(JSONObject().apply {
-                        put("id", id)
-                        put("alterId", aid)
-                        put("security", "auto")
-                    }))
-                }))
-            })
-            put("streamSettings", buildStreamSettings(net, tls, sni, host, path, "", pbk, fp, sid, spx, alpn))
-        }
-        
-        addOutbounds(template, proxyOutbound)
-        return template.toString()
-    }
-
-    private fun buildVlessJson(vlessUrl: String, forTest: Boolean): String {
-        val withoutScheme = vlessUrl.removePrefix("vless://")
-        val atIndex = withoutScheme.indexOf("@")
-        
-        var id = ""
-        var hostPortPath = withoutScheme
-        
-        if (atIndex != -1) {
-            id = withoutScheme.substring(0, atIndex)
-            id = URLDecoder.decode(id, "UTF-8")
-            hostPortPath = withoutScheme.substring(atIndex + 1)
-        }
-        
-        // Use http scheme to ensure Android Uri parses the host, port, and query properly
-        val uri = Uri.parse("http://$hostPortPath")
-        val add = uri.host ?: ""
-        val port = uri.port.takeIf { it > 0 } ?: 443
-        
-        val encryption = uri.getQueryParameter("encryption") ?: "none"
-        val security = uri.getQueryParameter("security") ?: ""
-        val net = uri.getQueryParameter("type") ?: "tcp"
-        val host = uri.getQueryParameter("host") ?: ""
-        val path = uri.getQueryParameter("path") ?: uri.getQueryParameter("serviceName") ?: ""
-        val sni = uri.getQueryParameter("sni") ?: ""
-        val flow = uri.getQueryParameter("flow") ?: ""
-        val pbk = uri.getQueryParameter("pbk") ?: ""
-        val fp = uri.getQueryParameter("fp") ?: ""
-        val sid = uri.getQueryParameter("sid") ?: ""
-        val spx = uri.getQueryParameter("spx") ?: ""
-        val alpn = uri.getQueryParameter("alpn") ?: ""
-
-        val template = getBaseTemplate(forTest)
-
-        val proxyOutbound = JSONObject().apply {
-            put("protocol", "vless")
-            put("settings", JSONObject().apply {
-                put("vnext", JSONArray().put(JSONObject().apply {
-                    put("address", add)
-                    put("port", port)
-                    put("users", JSONArray().put(JSONObject().apply {
-                        put("id", id)
-                        put("encryption", encryption)
-                        if (flow.isNotEmpty()) put("flow", flow)
-                    }))
-                }))
-            })
-            put("streamSettings", buildStreamSettings(net, security, sni, host, path, flow, pbk, fp, sid, spx, alpn))
-        }
-
-        addOutbounds(template, proxyOutbound)
-        return template.toString()
-    }
-
-    private fun buildTrojanJson(trojanUrl: String, forTest: Boolean): String {
-        val withoutScheme = trojanUrl.removePrefix("trojan://")
-        val atIndex = withoutScheme.indexOf("@")
-        
-        var password = ""
-        var hostPortPath = withoutScheme
-        
-        if (atIndex != -1) {
-            password = withoutScheme.substring(0, atIndex)
-            password = URLDecoder.decode(password, "UTF-8")
-            hostPortPath = withoutScheme.substring(atIndex + 1)
-        }
-        
-        // Use http scheme to ensure Android Uri parses the host, port, and query properly
-        val uri = Uri.parse("http://$hostPortPath")
-        val add = uri.host ?: ""
-        val port = uri.port.takeIf { it > 0 } ?: 443
-        
-        val security = uri.getQueryParameter("security") ?: "tls"
-        val net = uri.getQueryParameter("type") ?: "tcp"
-        val host = uri.getQueryParameter("host") ?: ""
-        val path = uri.getQueryParameter("path") ?: uri.getQueryParameter("serviceName") ?: ""
-        val sni = uri.getQueryParameter("sni") ?: ""
-        val pbk = uri.getQueryParameter("pbk") ?: ""
-        val fp = uri.getQueryParameter("fp") ?: ""
-        val sid = uri.getQueryParameter("sid") ?: ""
-        val spx = uri.getQueryParameter("spx") ?: ""
-        val alpn = uri.getQueryParameter("alpn") ?: ""
-
-        val template = getBaseTemplate(forTest)
-
-        val proxyOutbound = JSONObject().apply {
-            put("protocol", "trojan")
-            put("settings", JSONObject().apply {
-                put("servers", JSONArray().put(JSONObject().apply {
-                    put("address", add)
-                    put("port", port)
-                    put("password", password)
-                }))
-            })
-            put("streamSettings", buildStreamSettings(net, security, sni, host, path, "", pbk, fp, sid, spx, alpn))
-        }
-
-        addOutbounds(template, proxyOutbound)
-        return template.toString()
-    }
-
-    private fun buildShadowsocksJson(ssUrl: String, forTest: Boolean): String {
-        var base64Part = ssUrl.removePrefix("ss://")
-        val hashIndex = base64Part.indexOf("#")
-        if (hashIndex != -1) {
-            base64Part = base64Part.substring(0, hashIndex)
-        }
-
-        var method = ""
-        var password = ""
-        var add = ""
-        var port = 0
-
-        try {
-            if (base64Part.contains("@")) {
-                // Format: ss://method:password@host:port
-                // OR ss://base64(method:password)@host:port
-                val parts = base64Part.split("@")
-                val userInfo = parts[0]
-                val serverInfo = parts[1]
-
-                if (userInfo.contains(":")) {
-                    val userParts = userInfo.split(":")
-                    method = userParts[0]
-                    password = userParts[1]
-                } else {
-                    val decodedUserInfo = String(Base64.decode(userInfo, Base64.DEFAULT), Charsets.UTF_8)
-                    if (decodedUserInfo.contains(":")) {
-                        val userParts = decodedUserInfo.split(":")
-                        method = userParts[0]
-                        password = userParts[1]
-                    }
-                }
-
-                if (serverInfo.contains(":")) {
-                    val serverParts = serverInfo.split(":")
-                    add = serverParts[0]
-                    port = serverParts[1].toIntOrNull() ?: 443
-                }
-            } else {
-                // Format: ss://base64(method:password@host:port)
-                val decoded = String(Base64.decode(base64Part, Base64.DEFAULT), Charsets.UTF_8)
-                val atIndex = decoded.lastIndexOf("@")
-                if (atIndex != -1) {
-                    val creds = decoded.substring(0, atIndex)
-                    val server = decoded.substring(atIndex + 1)
-                    
-                    if (creds.contains(":")) {
-                        val credParts = creds.split(":")
-                        method = credParts[0]
-                        password = credParts[1]
-                    }
-                    
-                    if (server.contains(":")) {
-                        val serverParts = server.split(":")
-                        add = serverParts[0]
-                        port = serverParts[1].toIntOrNull() ?: 443
-                    }
-                }
-            }
-            
-            if (method.isEmpty() || add.isEmpty() || port == 0) {
-                throw IllegalArgumentException("Malformed SS link")
-            }
-        } catch (e: Exception) {
-            throw IllegalArgumentException("فرمت لینک Shadowsocks نامعتبر است.")
-        }
-
-        val template = getBaseTemplate(forTest)
-
-        val proxyOutbound = JSONObject().apply {
-            put("protocol", "shadowsocks")
-            put("settings", JSONObject().apply {
-                put("servers", JSONArray().put(JSONObject().apply {
-                    put("address", add)
-                    put("port", port)
-                    put("method", method)
-                    put("password", password)
-                }))
-            })
-        }
-
-        addOutbounds(template, proxyOutbound)
-        return template.toString()
+        return stream
     }
 }

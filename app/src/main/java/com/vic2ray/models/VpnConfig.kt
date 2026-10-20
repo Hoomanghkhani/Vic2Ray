@@ -1,12 +1,12 @@
 package com.vic2ray.models
 
 data class VpnConfig(
-    val id: String = java.util.UUID.randomUUID().toString(),
     val rawConfig: String,
     val protocol: ProtocolType,
     val name: String,
-    var ping: Int = -1, // -1 means untested or timeout
-    var isWorking: Boolean = false
+    val id: String = java.util.UUID.nameUUIDFromBytes(rawConfig.toByteArray(Charsets.UTF_8)).toString(),
+    val ping: Int = -1, // -1 means untested or timeout
+    val isWorking: Boolean = false
 )
 
 enum class ProtocolType {

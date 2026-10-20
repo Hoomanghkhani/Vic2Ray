@@ -3,36 +3,66 @@ plugins {
     id 'org.jetbrains.kotlin.android'
 }
 
+def appVersion = new Properties()
+rootProject.file('version.properties').withInputStream { appVersion.load(it) }
+def releaseStorePath = System.getenv('ANDROID_KEYSTORE_PATH')
+def signingValues = [releaseStorePath, System.getenv('ANDROID_KEYSTORE_PASSWORD'),
+                     System.getenv('ANDROID_KEY_ALIAS'), System.getenv('ANDROID_KEY_PASSWORD')]
+def hasReleaseSigning = signingValues.every { it != null && !it.isEmpty() }
+
 android {
     namespace 'com.vic2ray'
-    compileSdk 33
+    compileSdk 35
 
     defaultConfig {
         applicationId "com.vic2ray"
         minSdk 24
-        targetSdk 33
-        versionCode 20
-        versionName "1.0.20"
+        targetSdk 35
+        versionCode appVersion.getProperty('versionCode').toInteger()
+        versionName appVersion.getProperty('versionName')
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
             useSupportLibrary true
         }
         ndk {
-            // فقط معماری گوشی‌های جدید را نگه می‌دارد تا حجم برنامه ۳ برابر کمتر شود
-            // x86_64 is added for Android Studio Emulator support
+            // Keep the phone and emulator architectures supported by the bundled core.
             abiFilters 'arm64-v8a', 'x86_64'
+        }
+    }
+
+    signingConfigs {
+        if (hasReleaseSigning) {
+            release {
+                storeFile file(releaseStorePath)
+                storePassword signingValues[1]
+                keyAlias signingValues[2]
+                keyPassword signingValues[3]
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            if (hasReleaseSigning) signingConfig signingConfigs.release
         }
     }
 
     applicationVariants.all { variant ->
         variant.outputs.all { output ->
-            outputFileName = "Vic2Ray-VPN.apk"
+            outputFileName = "Vic2Ray-VPN-${appVersion.getProperty('versionName')}-${variant.name}.apk"
         }
     }
 
     buildFeatures {
         compose true
+        buildConfig true
+    }
+    bundle {
+        language {
+            // Both in-app languages must stay available for offline language switching.
+            enableSplit = false
+        }
     }
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
@@ -43,6 +73,15 @@ android {
     }
     composeOptions {
         kotlinCompilerExtensionVersion '1.4.0'
+    }
+}
+
+// A release must never silently produce an unsigned APK.
+gradle.taskGraph.whenReady { graph ->
+    if (graph.allTasks.any { it.project == project &&
+            it.name in ['assembleRelease', 'bundleRelease', 'packageRelease'] } && !hasReleaseSigning) {
+        throw new GradleException('Release signing requires ANDROID_KEYSTORE_PATH, ' +
+                'ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS and ANDROID_KEY_PASSWORD.')
     }
 }
 
@@ -60,4 +99,6 @@ dependencies {
     implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.6.4'
     implementation files('libs/libv2ray.aar')
     implementation 'com.google.code.gson:gson:2.10.1'
+    testImplementation 'junit:junit:4.13.2'
+    testImplementation 'org.json:json:20231013'
 }
