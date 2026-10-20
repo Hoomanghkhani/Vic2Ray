@@ -3,17 +3,22 @@ package com.vic2ray.ui
 import android.app.Application
 import android.content.Context
 import android.net.ConnectivityManager
+import android.net.Network
 import android.net.NetworkCapabilities
+import android.os.SystemClock
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import com.vic2ray.fetcher.ConfigFetcher
 import com.vic2ray.models.AutoRefreshPolicy
+import com.vic2ray.models.NetworkHealthCache
+import com.vic2ray.models.NetworkType
 import com.vic2ray.models.ProtocolType
 import com.vic2ray.models.ServerCatalog
 import com.vic2ray.models.ServerSort
 import com.vic2ray.models.SubscriptionSources
+import com.vic2ray.models.TestFailure
 import com.vic2ray.models.VpnConfig
 import com.vic2ray.parser.ConfigParser
 import com.vic2ray.tester.ConnectivityTester
@@ -40,13 +45,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val fetcher = ConfigFetcher()
     private val parser = ConfigParser()
     private val tester by lazy { ConnectivityTester(application) }
+    private val connectivityManager = application.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+    private val networkHealth = NetworkHealthCache()
+    private var networkCallback: ConnectivityManager.NetworkCallback? = null
+    private var observedNetworkHandle: Long? = null
+    private var physicalNetworkHandle: Long? = null
+    private var networkInitialized = false
+    private var internetAvailable = false
     @Volatile private var syncJob: Job? = null
     private var autoRefreshJob: Job? = null
     private var automaticSync = false
     private var syncGeneration = 0L
     private var appStarted = false
     private var importVisible = false
-    private var lastAutoAttempt = prefs.getLong("last_auto_attempt", 0L)
+    private var lastAutoAttempt = 0L
     private var persistJob: Job? = null
     private var importedLinks = prefs.getStringSet("imported_links", emptySet()).orEmpty().toSet()
 
@@ -73,7 +85,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val sourceCounts = _sourceCounts.asStateFlow()
     private val _sourceFailures = MutableStateFlow<List<String>>(emptyList())
     val sourceFailures = _sourceFailures.asStateFlow()
-    private val _lastSyncTime = MutableStateFlow(prefs.getLong("last_sync_time", 0L))
+    private val _networkType = MutableStateFlow(NetworkType.OFFLINE)
+    val networkType = _networkType.asStateFlow()
+    private val _testFailures = MutableStateFlow<Map<TestFailure, Int>>(emptyMap())
+    val testFailures = _testFailures.asStateFlow()
+    private val _lastSyncTime = MutableStateFlow(0L)
     val lastSyncTime = _lastSyncTime.asStateFlow()
     private val _language = MutableStateFlow(
         prefs.getString("language", Locale.getDefault().language).let { if (it == "fa") "fa" else "en" })
@@ -109,7 +125,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         gson.fromJson<List<VpnConfig>>(prefs.getString("cached_configs", "[]"), type).orEmpty()
             .filter { it.rawConfig.isNotBlank() && it.protocol != ProtocolType.UNKNOWN }
             .distinctBy { it.rawConfig }.take(MAX_CACHED_CONFIGS)
-            .map { it.copy(id = UUID.nameUUIDFromBytes(it.rawConfig.toByteArray(Charsets.UTF_8)).toString()) }
+            .map { it.copy(id = UUID.nameUUIDFromBytes(it.rawConfig.toByteArray(Charsets.UTF_8)).toString(),
+                ping = -1, isWorking = false, lastTestFailure = null, lastHttpStatus = null) }
     }.getOrDefault(emptyList())
 
     /** Serialize snapshots off the UI thread; only the newest snapshot may commit. */
@@ -148,9 +165,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     /** The activity owns this foreground-only loop; it never starts background services. */
     fun onAppStarted() {
         appStarted = true
+        observeNetwork()
+        refreshNetworkState()
         if (autoRefreshJob?.isActive == true) return
         autoRefreshJob = viewModelScope.launch {
             while (isActive) {
+                refreshNetworkState()
                 maybeAutoRefresh()
                 delay(30_000)
             }
@@ -161,7 +181,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         appStarted = false
         autoRefreshJob?.cancel()
         autoRefreshJob = null
-        if (automaticSync) stopSync()
+        // Without a callback, foreground polling cannot protect a background scan's profile.
+        if (automaticSync || (networkCallback == null && syncJob?.isActive == true)) stopSync()
     }
 
     fun setAutoRefresh(enabled: Boolean) {
@@ -177,7 +198,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun maybeAutoRefresh() {
-        if (!appStarted) return
+        if (!appStarted || physicalNetworkHandle == null || !internetAvailable) return
         val vpnActive = VicVpnService.isConnected.value || VicVpnService.isConnecting.value
         if (vpnActive && automaticSync) stopSync()
         if (AutoRefreshPolicy.shouldRefresh(
@@ -188,6 +209,72 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 hasWorkingServers = _allConfigs.value.any { it.isWorking && it.ping > 0 },
                 interactionActive = importVisible
             )) startSync(automatic = true)
+    }
+
+    /** Manual scans may continue while backgrounded, so network identity follows the ViewModel. */
+    private fun observeNetwork() {
+        if (networkCallback != null) return
+        val callback = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) = postNetworkUpdate(this)
+            override fun onLost(network: Network) = postNetworkUpdate(this)
+            override fun onCapabilitiesChanged(network: Network, capabilities: NetworkCapabilities) =
+                postNetworkUpdate(this, network, capabilities)
+        }
+        networkCallback = callback
+        if (runCatching { connectivityManager.registerDefaultNetworkCallback(callback) }.isFailure) {
+            networkCallback = null // The foreground polling loop remains available.
+        }
+    }
+
+    private fun postNetworkUpdate(callback: ConnectivityManager.NetworkCallback,
+        network: Network? = null, capabilities: NetworkCapabilities? = null) {
+        viewModelScope.launch(Dispatchers.Main.immediate) {
+            if (networkCallback !== callback) return@launch
+            val active = connectivityManager.activeNetwork
+            refreshNetworkState(active, if (network == active) capabilities else null)
+            maybeAutoRefresh()
+        }
+    }
+
+    @Synchronized
+    private fun refreshNetworkState(network: Network? = connectivityManager.activeNetwork,
+        suppliedCapabilities: NetworkCapabilities? = null) {
+        val capabilities = suppliedCapabilities ?: connectivityManager.getNetworkCapabilities(network)
+        internetAvailable = capabilities?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
+        val vpn = capabilities?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) == true
+        val handle = network?.networkHandle?.takeIf { internetAvailable }
+        val physicalHandle = handle?.takeUnless { vpn }
+        _networkType.value = when {
+            !internetAvailable -> NetworkType.OFFLINE
+            vpn -> NetworkType.OTHER
+            capabilities?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true -> NetworkType.WIFI
+            capabilities?.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) == true -> NetworkType.MOBILE
+            else -> NetworkType.OTHER
+        }
+        if (networkInitialized && handle == observedNetworkHandle && physicalHandle == physicalNetworkHandle) return
+        networkInitialized = true
+        ++syncGeneration
+        syncJob?.cancel()
+        syncJob = null
+        automaticSync = false
+        _allConfigs.value = networkHealth.switchTo(physicalHandle, _allConfigs.value, SystemClock.elapsedRealtime())
+        observedNetworkHandle = handle
+        physicalNetworkHandle = physicalHandle
+        _testFailures.value = emptyMap()
+        _sourceFailures.value = emptyList()
+        _sourceCounts.value = emptyMap()
+        _lastSyncTime.value = 0L
+        lastAutoAttempt = 0L
+        prefs.edit().putLong("last_auto_attempt", 0L).apply()
+        _uiState.value = if (_allConfigs.value.isEmpty()) UiState.Idle else UiState.Success(_allConfigs.value)
+        persistCatalog()
+    }
+
+    override fun onCleared() {
+        val callback = networkCallback
+        networkCallback = null
+        if (callback != null) runCatching { connectivityManager.unregisterNetworkCallback(callback) }
+        super.onCleared()
     }
 
     /** Give tunnel startup priority over discovery, including the native test cores. */
@@ -232,9 +319,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     @Synchronized
     private fun startSync(automatic: Boolean) {
         if (syncJob?.isActive == true) return
-        val manager = getApplication<Application>().getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-        val capabilities = manager.getNetworkCapabilities(manager.activeNetwork)
-        if (capabilities?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) != true) {
+        refreshNetworkState()
+        if (!internetAvailable) {
             if (!automatic) _uiState.value = UiState.Error(message(
                 "No internet connection. Cached servers are still available.",
                 "اتصال اینترنت برقرار نیست. سرورهای ذخیره‌شده همچنان در دسترس‌اند."))
@@ -253,23 +339,29 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         prefs.edit().putLong("last_auto_attempt", lastAutoAttempt).apply()
         val scanLimit = if (automatic) MAX_AUTO_SCAN_CONFIGS else MAX_SCAN_CONFIGS
         val generation = ++syncGeneration
+        val scanNetworkHandle = observedNetworkHandle
+        fun isCurrentScan() = generation == syncGeneration && scanNetworkHandle == observedNetworkHandle
         syncJob = viewModelScope.launch {
+            _testFailures.value = emptyMap()
             _sourceFailures.value = emptyList()
             _sourceCounts.value = emptyMap()
             _uiState.value = UiState.Loading(message("Updating subscription sources…", "در حال دریافت منابع…"))
             try {
                 val fetched = fetcher.fetchSources(sources)
+                if (!isCurrentScan()) return@launch
                 val groups = withContext(Dispatchers.Default) {
                     fetched.documents.map { document ->
                         document.url to parser.parseConfigs(listOf(document.body))
                     }
                 }
+                if (!isCurrentScan()) return@launch
                 _sourceCounts.value = groups.associate { it.first to it.second.size }
                 _sourceFailures.value = (fetched.failedSources +
                     groups.filter { it.second.isEmpty() }.map { it.first }).distinct()
                 val parsed = withContext(Dispatchers.Default) {
                     ServerCatalog.interleaveSources(groups.map { it.second })
                 }
+                if (!isCurrentScan()) return@launch
                 val initialCursor = prefs.getInt("scan_cursor", 0)
                 val candidates = ServerCatalog.scanCandidates(ServerCatalog.merge(pinned, parsed),
                     priorityLinks = _favorites.value + importedLinks,
@@ -285,6 +377,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 _uiState.value = UiState.Testing(0, candidates.size, emptyList())
                 val found = mutableListOf<VpnConfig>()
                 tester.testAllStreaming(candidates) { result ->
+                    // A probe may finish before Android's queued network callback reaches Main.
+                    refreshNetworkState()
+                    if (!isCurrentScan()) return@testAllStreaming
                     tested++
                     // Save completed progress even if backgrounding cancels the rest of this page.
                     prefs.edit().putInt("scan_cursor", (initialCursor.toLong() + tested)
@@ -292,13 +387,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     if (result.isWorking) {
                         working++
                         found.add(result)
+                    } else {
+                        val failure = result.lastTestFailure ?: TestFailure.CONNECTION
+                        _testFailures.value = _testFailures.value +
+                            (failure to ((_testFailures.value[failure] ?: 0) + 1))
                     }
                     if (result.isWorking || _allConfigs.value.any { it.rawConfig == result.rawConfig }) {
                         _allConfigs.value = trimCatalog(ServerCatalog.merge(_allConfigs.value, listOf(result)))
                     }
+                    networkHealth.record(result, SystemClock.elapsedRealtime())
                     _uiState.value = UiState.Testing(tested, candidates.size, found.toList())
                     if (tested % 25 == 0) persistCatalog()
                 }
+                if (!isCurrentScan()) return@launch
                 _lastSyncTime.value = System.currentTimeMillis()
                 persistCatalog()
                 _uiState.value = if (working > 0) UiState.Success(_allConfigs.value) else
@@ -307,11 +408,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: Exception) {
-                _uiState.value = UiState.Error(message("Update failed. Your saved servers are still available.",
+                if (isCurrentScan()) _uiState.value = UiState.Error(message(
+                    "Update failed. Your saved servers are still available.",
                     "به‌روزرسانی ناموفق بود. سرورهای ذخیره‌شده همچنان در دسترس‌اند."))
             } finally {
-                if (generation == syncGeneration) automaticSync = false
-                persistCatalog()
+                if (isCurrentScan()) {
+                    automaticSync = false
+                    persistCatalog()
+                }
             }
         }
     }
@@ -325,6 +429,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun stopSync() {
+        ++syncGeneration
         lastAutoAttempt = System.currentTimeMillis()
         prefs.edit().putLong("last_auto_attempt", lastAutoAttempt).apply()
         syncJob?.cancel()

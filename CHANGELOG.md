@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.3.0 — 2026-10-20
+
+- Removed the latency test's dependency on direct public DNS: test hostnames are forwarded to the selected proxy using `AsIs` routing and an isolated, proxy-only configuration.
+- Routed VPN DNS over remote HTTPS through the selected proxy, with literal resolver addresses for bootstrap and proxied TCP forwarding for other DNS record types.
+- Separated server health by physical Android network. Switching networks cancels the old scan, rejects its late results and clears unrelated success/failure indicators; recent results can be restored for up to three network handles during the current process, for at most one hour.
+- Added the current network label and safe, localized failure categories for initialization, configuration, core startup, DNS, timeout, TLS, HTTP responses and connection errors.
+- Rejected links requesting insecure TLS before native startup: the bundled core no longer accepts that setting. Certificate verification stays enabled.
+- Added regression coverage for network cache isolation/expiry, probe diagnostics and DNS/TLS configuration. A controlled desktop native-core experiment reproduced a healthy proxy timing out with direct DNS unavailable, then succeeding with the corrected routing; this does not establish the cause of a particular user's Wi-Fi failure or replace Android device testing.
+- Version 1.3.0 / Android code 24 retains the existing release signing key and six free public subscriptions.
+
 ## 1.2.0 — 2026-10-20
 
 - Selected six compact GitHub subscriptions using live downloads, file-level update dates and the app's actual parser; replaced the stale Auto_proxy feed and updated the aggregator's canonical repository path.

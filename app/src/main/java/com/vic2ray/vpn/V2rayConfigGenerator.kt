@@ -48,7 +48,7 @@ object V2rayConfigGenerator {
             .put("protocol", if (protocol == ProtocolType.SS) "shadowsocks" else protocol.name.lowercase(Locale.ROOT))
             .put("settings", settings)
         if (protocol != ProtocolType.SS) outbound.put("streamSettings", buildStreamSettings(link))
-        addOutbounds(template, outbound)
+        addOutbounds(template, outbound, forTest)
         return template.toString()
     }
 
@@ -139,28 +139,34 @@ object V2rayConfigGenerator {
 
         template.put("inbounds", inbounds)
 
-        // Simple, proven DNS config - NO FakeDNS (causes messaging app failures)
+        // Forward the requested hostname through the proxy without a local DNS preflight.
+        // A dead public resolver must not turn a healthy proxy into a failed latency test.
+        if (forTest) {
+            template.put("routing", JSONObject().put("domainStrategy", "AsIs")
+                .put("rules", JSONArray()))
+            return template
+        }
+
+        // Remote DoH uses the selected proxy; literal resolver IPs avoid a bootstrap lookup.
         template.put("dns", JSONObject().apply {
-            put("hosts", JSONObject().apply {
-                // Force Google domains to known IPs to avoid DNS issues
-                put("dns.google", "8.8.8.8")
-            })
+            put("tag", "dns-internal")
             val servers = JSONArray()
-            // Primary: Google DNS via proxy
-            servers.put("8.8.8.8")
-            // Secondary: Cloudflare
-            servers.put("1.1.1.1")
-            // Fallback
-            servers.put("8.8.4.4")
+            servers.put("https://1.1.1.1/dns-query")
+            servers.put("https://8.8.8.8/dns-query")
             put("servers", servers)
             // Force IPv4 to avoid IPv6 issues with free proxies
             put("queryStrategy", "UseIPv4")
         })
 
-        // Clean routing - matches v2rayNG proven pattern
         template.put("routing", JSONObject().apply {
-            put("domainStrategy", "IPIfNonMatch")
+            put("domainStrategy", "AsIs")
             val rules = JSONArray()
+
+            rules.put(JSONObject().apply {
+                put("type", "field")
+                put("inboundTag", JSONArray().put("dns-internal"))
+                put("outboundTag", "proxy")
+            })
 
             // 1. Route DNS (port 53) through proxy outbound (critical for messaging apps)
             rules.put(JSONObject().apply {
@@ -211,7 +217,7 @@ object V2rayConfigGenerator {
         return template
     }
 
-    private fun addOutbounds(template: JSONObject, proxyOutbound: JSONObject) {
+    private fun addOutbounds(template: JSONObject, proxyOutbound: JSONObject, forTest: Boolean) {
         val outbounds = JSONArray()
         
         // Ensure proxy outbound has a tag
@@ -220,9 +226,20 @@ object V2rayConfigGenerator {
         }
         
         outbounds.put(proxyOutbound)
+        if (forTest) {
+            template.put("outbounds", outbounds)
+            return
+        }
         outbounds.put(JSONObject().apply {
             put("protocol", "dns")
             put("tag", "dns-out")
+            put("settings", JSONObject().apply {
+                put("network", "tcp")
+                put("address", "1.1.1.1")
+                put("port", 53)
+                put("nonIPQuery", "skip")
+            })
+            put("proxySettings", JSONObject().put("tag", "proxy"))
         })
         outbounds.put(JSONObject().apply {
             put("protocol", "freedom")
@@ -265,7 +282,10 @@ object V2rayConfigGenerator {
                 parameters["spx"]?.let { tls.put("spiderX", it) }
             } else {
                 val insecure = parameters["allowInsecure"] ?: parameters["insecure"] ?: "false"
-                tls.put("allowInsecure", insecure.equals("true", true) || insecure == "1")
+                require(!insecure.equals("true", true) && insecure != "1") {
+                    "The bundled core requires TLS certificate verification. Import a certificate-verified link."
+                }
+                tls.put("allowInsecure", false)
             }
             stream.put(if (security == "reality") "realitySettings" else "tlsSettings", tls)
         }

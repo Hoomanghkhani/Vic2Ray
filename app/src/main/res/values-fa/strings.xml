@@ -1,5 +1,19 @@
 <resources>
     <string name="app_name">Vic2Ray</string>
+    <string name="network_wifi">وای‌فای</string>
+    <string name="network_mobile">دیتای سیم‌کارت</string>
+    <string name="network_other">شبکهٔ فعلی</string>
+    <string name="network_offline">بدون اتصال اینترنت</string>
+    <string name="network_test_context">نتایج آزمایش برای %1$s</string>
+    <string name="test_failure_summary">دلایل آزمایش‌های ناموفق</string>
+    <string name="test_error_initialization">خطا در آماده‌سازی هسته</string>
+    <string name="test_error_configuration">کانفیگ ناسازگار</string>
+    <string name="test_error_core_start">خطا در راه‌اندازی هسته</string>
+    <string name="test_error_dns">حل‌نشدن نام دامنه</string>
+    <string name="test_error_timeout">پایان مهلت آزمایش</string>
+    <string name="test_error_tls">ارتباط امن برقرار نشد</string>
+    <string name="test_error_http">پاسخ نامعتبر سایت آزمایش</string>
+    <string name="test_error_connection">ارتباط برقرار نشد</string>
     <string name="tagline">اتصال شما، انتخاب شما</string>
     <string name="more_options">گزینه‌های بیشتر</string>
     <string name="language">English</string>

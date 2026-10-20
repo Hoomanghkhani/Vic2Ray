@@ -1,5 +1,19 @@
 <resources>
     <string name="app_name">Vic2Ray</string>
+    <string name="network_wifi">Wi-Fi</string>
+    <string name="network_mobile">Mobile data</string>
+    <string name="network_other">Current network</string>
+    <string name="network_offline">Offline</string>
+    <string name="network_test_context">Test results for %1$s</string>
+    <string name="test_failure_summary">Why tests failed</string>
+    <string name="test_error_initialization">Core initialization failed</string>
+    <string name="test_error_configuration">Unsupported configuration</string>
+    <string name="test_error_core_start">Core could not start</string>
+    <string name="test_error_dns">Domain lookup failed</string>
+    <string name="test_error_timeout">Test deadline reached</string>
+    <string name="test_error_tls">Secure connection failed</string>
+    <string name="test_error_http">Unexpected test-site response</string>
+    <string name="test_error_connection">Connection failed</string>
     <string name="tagline">Your connection. Your choice.</string>
     <string name="more_options">More options</string>
     <string name="language">فارسی</string>

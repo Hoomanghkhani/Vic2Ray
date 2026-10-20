@@ -6,7 +6,9 @@ data class VpnConfig(
     val name: String,
     val id: String = java.util.UUID.nameUUIDFromBytes(rawConfig.toByteArray(Charsets.UTF_8)).toString(),
     val ping: Int = -1, // -1 means untested or timeout
-    val isWorking: Boolean = false
+    val isWorking: Boolean = false,
+    val lastTestFailure: TestFailure? = null,
+    val lastHttpStatus: Int? = null
 )
 
 enum class ProtocolType {

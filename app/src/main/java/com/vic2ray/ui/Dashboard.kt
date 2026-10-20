@@ -51,7 +51,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.vic2ray.R
 import com.vic2ray.models.ProtocolType
+import com.vic2ray.models.NetworkType
 import com.vic2ray.models.ServerSort
+import com.vic2ray.models.TestFailure
 import com.vic2ray.models.VpnConfig
 import com.vic2ray.vpn.VicVpnService
 import kotlinx.coroutines.delay
@@ -81,6 +83,8 @@ internal fun Dashboard(
     val sort by viewModel.sortOrder.collectAsState()
     val lastSync by viewModel.lastSyncTime.collectAsState()
     val failures by viewModel.sourceFailures.collectAsState()
+    val testFailures by viewModel.testFailures.collectAsState()
+    val networkType by viewModel.networkType.collectAsState()
     val language by viewModel.language.collectAsState()
     val connected by VicVpnService.isConnected.collectAsState()
     val connecting by VicVpnService.isConnecting.collectAsState()
@@ -167,6 +171,9 @@ internal fun Dashboard(
             if (refreshing) item(key = "progress") {
                 RefreshProgress(state, viewModel::stopSync)
             }
+            if (testFailures.isNotEmpty()) item(key = "test_failures") {
+                TestFailureSummary(testFailures)
+            }
             val errorMessage = localError ?: serviceError
             if (!errorMessage.isNullOrBlank()) item(key = "connection_error") {
                 MessageCard(stringResource(R.string.connection_error), errorMessage, isError = true)
@@ -195,6 +202,13 @@ internal fun Dashboard(
                             Text(stringResource(R.string.servers), fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleLarge, modifier = Modifier.semantics { heading() })
                             Spacer(Modifier.height(3.dp))
                             Text(lastSyncLabel, style = MaterialTheme.typography.labelSmall, color = Muted)
+                            Text(stringResource(R.string.network_test_context, stringResource(when (networkType) {
+                                NetworkType.WIFI -> R.string.network_wifi
+                                NetworkType.MOBILE -> R.string.network_mobile
+                                NetworkType.OTHER -> R.string.network_other
+                                NetworkType.OFFLINE -> R.string.network_offline
+                            })), style = MaterialTheme.typography.labelSmall, color = Muted,
+                                modifier = Modifier.padding(top = 3.dp))
                         }
                         Text(stringResource(R.string.server_count, visible.size), style = MaterialTheme.typography.labelMedium, color = Muted)
                     }
@@ -417,6 +431,20 @@ private fun connectionDuration(since: Long): String {
 }
 
 @Composable
+private fun TestFailureSummary(failures: Map<TestFailure, Int>) {
+    val reasons = failures.entries.sortedByDescending { it.value }
+        .map { "${testFailureLabel(it.key)}: ${it.value}" }.joinToString(" · ")
+    Card(shape = RoundedCornerShape(18.dp),
+        colors = CardDefaults.cardColors(containerColor = PanelLight, contentColor = MainText)) {
+        Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(stringResource(R.string.test_failure_summary), color = Warning,
+                style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
+            Text(reasons, color = Muted, style = MaterialTheme.typography.bodySmall)
+        }
+    }
+}
+
+@Composable
 private fun RefreshProgress(state: UiState, onStop: () -> Unit) {
     Card(shape = RoundedCornerShape(18.dp), colors = CardDefaults.cardColors(containerColor = PanelLight, contentColor = MainText)) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -524,7 +552,11 @@ private fun ServerCard(config: VpnConfig, favorite: Boolean, active: Boolean, co
             }
             Row(Modifier.fillMaxWidth().padding(start = 68.dp, end = 8.dp, bottom = 3.dp), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text(if (config.isWorking && config.ping > 0) stringResource(R.string.latency_ms, config.ping) else stringResource(R.string.not_tested), color = latencyColor, style = MaterialTheme.typography.labelMedium)
+                    Text(when {
+                        config.isWorking && config.ping > 0 -> stringResource(R.string.latency_ms, config.ping)
+                        config.lastTestFailure != null -> testFailureLabel(config.lastTestFailure)
+                        else -> stringResource(R.string.not_tested)
+                    }, color = latencyColor, style = MaterialTheme.typography.labelMedium)
                     if (active || connecting) Text(stringResource(if (active) R.string.active else R.string.connecting), color = accent, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
                 }
                 IconButton(onClick = onShare) { Icon(Icons.Default.Share, stringResource(R.string.share_server, config.name), tint = Muted, modifier = Modifier.size(18.dp)) }

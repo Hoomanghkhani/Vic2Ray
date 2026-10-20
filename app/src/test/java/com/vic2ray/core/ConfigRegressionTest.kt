@@ -72,12 +72,45 @@ class ConfigRegressionTest {
         assertEquals("2001:db8::1", server.getString("address"))
     }
 
-    @Test fun tlsVerifiesCertificatesUnlessExplicitlyDisabled() {
+    @Test fun tlsVerifiesCertificatesByDefault() {
         fun tls(query: String) = generate("trojan://password@example.com:443?$query", ProtocolType.TROJAN)
             .getJSONArray("outbounds").getJSONObject(0).getJSONObject("streamSettings").getJSONObject("tlsSettings")
         assertFalse(tls("security=tls").getBoolean("allowInsecure"))
         assertFalse(tls("security=tls&allowInsecure=0").getBoolean("allowInsecure"))
-        assertTrue(tls("security=tls&allowInsecure=1").getBoolean("allowInsecure"))
+    }
+
+    @Test fun insecureTlsLinksAreRejectedBeforeTheNativeCoreFails() {
+        listOf("allowInsecure=1", "insecure=true").forEach { option ->
+            assertThrows(IllegalArgumentException::class.java) {
+                generate("trojan://password@example.com:443?security=tls&$option", ProtocolType.TROJAN)
+            }
+        }
+    }
+
+    @Test fun proxyTestsDoNotRequirePublicDnsBeforeForwardingAHostname() {
+        val json = generate("ss://aes-128-gcm:p@example.com:443", ProtocolType.SS)
+        assertEquals("AsIs", json.getJSONObject("routing").getString("domainStrategy"))
+        assertFalse(json.has("dns"))
+        assertEquals(0, json.getJSONObject("routing").getJSONArray("rules").length())
+        assertEquals(1, json.getJSONArray("outbounds").length())
+    }
+
+    @Test fun vpnDnsUsesRemoteHttpsAndProxyChainingForOtherRecordTypes() {
+        val json = JSONObject(V2rayConfigGenerator.generateJsonConfig(
+            "ss://aes-128-gcm:p@example.com:443", ProtocolType.SS, forTest = false))
+        val dns = json.getJSONObject("dns")
+        assertEquals("dns-internal", dns.getString("tag"))
+        assertEquals("https://1.1.1.1/dns-query", dns.getJSONArray("servers").getString(0))
+        assertEquals("https://8.8.8.8/dns-query", dns.getJSONArray("servers").getString(1))
+        val routing = json.getJSONObject("routing")
+        assertEquals("AsIs", routing.getString("domainStrategy"))
+        val first = routing.getJSONArray("rules").getJSONObject(0)
+        assertEquals("dns-internal", first.getJSONArray("inboundTag").getString(0))
+        assertEquals("proxy", first.getString("outboundTag"))
+        val dnsOut = json.getJSONArray("outbounds").getJSONObject(1)
+        assertEquals("proxy", dnsOut.getJSONObject("proxySettings").getString("tag"))
+        assertEquals("tcp", dnsOut.getJSONObject("settings").getString("network"))
+        assertEquals("skip", dnsOut.getJSONObject("settings").getString("nonIPQuery"))
     }
 
     @Test fun assigningTestPortPreservesCredentialsAndRemotePort() {
